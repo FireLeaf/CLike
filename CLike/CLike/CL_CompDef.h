@@ -11,6 +11,24 @@
 #ifndef __COCONAT_COMPDEF_H_
 #define __COCONAT_COMPDEF_H_
 
+enum e_ErrorLevel
+{
+	LEVEL_WARNING,
+	LEVEL_ERROR,
+};
+
+enum e_WorkStage
+{
+	STAGE_COMPILE,
+	STAGE_LINK,
+};
+
+enum e_LexState
+{
+	LEX_NORMAL,
+	LEX_SEP,
+};
+
 enum e_TokenCode
 {
 	//ÔËËã·û¼°·Ö¸ô·û

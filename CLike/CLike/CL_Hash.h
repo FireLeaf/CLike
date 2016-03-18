@@ -11,26 +11,17 @@
 #ifndef __COCONAT_CL_HASH_H_
 #define __COCONAT_CL_HASH_H_
 
+#include <vector>
+#include <string>
+
+#include "CL_CompDef.h"
+
 struct Symbol
 {
 
 };
 
 #define MAXKEY 1024
-
-int elf_hash(const char* key)
-{
-	int h = 0, g = 0;
-	while (*key)
-	{
-		h = (h << 4) + *key++;
-		g = h & 0xf00000000;
-		if (g)
-			h ^= g >> 24;
-		h &= ~g;
-	}
-	return h % MAXKEY;
-}
 
 struct TKWord 
 {
@@ -43,11 +34,47 @@ struct TKWord
 
 struct TKHashtable
 {
+	static int elf_hash(const char* key)
+	{
+		unsigned int h = 0, g = 0;
+		while (*key)
+		{
+			h = (h << 4) + *key++;
+			g = h & 0xf00000000;
+			if (g)
+				h ^= g >> 24;
+			h &= ~g;
+		}
+		return h % MAXKEY;
+	}
+
+
 	TKHashtable()
 	{
 		for (int i = 0; i < MAXKEY; i++)
 		{
+			tk_hashtable[i] = nullptr;
+		}
+	}
+
+	~TKHashtable()
+	{
+		for (int i = 0; i < MAXKEY; i++)
+		{
+			TKWord* p = tk_hashtable[i];
+			while (p != nullptr)
+			{
+				TKWord* q = p->next;
+				if (p->tkcode >= TK_IDENT)
+					free(p);
+				p = q;
+			}
 			tk_hashtable[i] = NULL;
+// 			if (tk_hashtable[i])
+// 			{
+// 				free(tk_hashtable[i]);
+// 				tk_hashtable[i] = NULL;
+// 			}
 		}
 	}
 
@@ -73,7 +100,7 @@ struct TKHashtable
 		return p;
 	}
 
-	void insert(const char* words)
+	TKWord* insert(const char* words)
 	{
 		TKWord* tp = NULL;
 		int keyno = 0;
@@ -85,10 +112,10 @@ struct TKHashtable
 		tp = find(words, keyno);
 		if (tp)
 		{
-			return;
+			return tp;
 		}
 		length = strlen(words);
-		tp = malloc(sizeof(TKWord) + length + 1);
+		tp = reinterpret_cast<TKWord*>(malloc(sizeof(TKWord) + length + 1));
 		tp->next = tk_hashtable[keyno];
 		tk_hashtable[keyno] = tp;
 		tk_wordtable.push_back(tp);
@@ -97,6 +124,13 @@ struct TKHashtable
 		tp->words = s;
 		strcpy(s, words);
 		s[length] = '\0';
+		
+		return tp;
+	}
+
+	const char* get_word_string(int idx)
+	{
+		return tk_wordtable[idx] ? tk_wordtable[idx]->words : NULL;
 	}
 protected:
 	TKWord* tk_hashtable[MAXKEY];
