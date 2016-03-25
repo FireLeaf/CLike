@@ -16,11 +16,6 @@
 
 #include "CL_CompDef.h"
 
-struct Symbol
-{
-
-};
-
 #define MAXKEY 1024
 
 struct TKWord 

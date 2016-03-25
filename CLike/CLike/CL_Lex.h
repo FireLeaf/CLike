@@ -40,11 +40,16 @@ public:
 		return lex;
 	}
 public:
-	// initialize lex
-	void init_lex();
+	// @Function initialize lex
+	// @Param file_name the source code file path
+	int init_lex(const char* file_name);
 	
 	// get the word_idx correspond word name string
 	const char *get_tkstr(int word_idx);
+
+	// @Function get word
+	// @Param word_idx the word index
+	TKWord* get_tkword(int word_idx);
 
 	// get a character
 	void get_char();
@@ -57,6 +62,12 @@ public:
 
 	// get a token
 	void get_token();
+
+	// @Function syntax indent
+	void syntax_indent();
+
+	// @Function color token
+	void color_token(int lex_state);
 
 	// skip a token what is must be need
 	void skip(int c);
@@ -96,5 +107,8 @@ public:
 extern char* filename;
 extern int linenum;
 extern int token;
+extern e_SyntaxState syntax_state;//current syntax state
+extern int syntax_level;
+extern int tkvalue;
 
 #endif

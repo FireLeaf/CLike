@@ -1,26 +1,23 @@
-struct Hello 
-{
+struct Hello {
 	int a;
-	int world;
-	char int;
-};
+int world;
+	char hello;}
 
 void Func(int g)
 {
 	int a[100] = 10;
+ int i;
 	struct Hello a;
 
-	for (int i = 0; i < 100; i++)
-	{
-		a[i] += 9;
-
-		if (a[i] % 7 == 3 )
+	for (i = 0; i < 100; i = i + 1)
+	{a[i] = a[i] + 9;
+if (a[i] % 7 == 3 )
 		{
-			printf("hello");
-		}
+		printf("hello");
+	}
 		else if (a[i] % 8 == 2)
 		{
-			printf("world");
+printf("world");
 		}
 		else
 		{

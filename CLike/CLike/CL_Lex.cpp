@@ -22,6 +22,10 @@ char* filename = "...";
 int linenum = 0;
 int token = TK_EOF;
 
+e_SyntaxState syntax_state = SNTX_NUL;//current syntax state
+int syntax_level = 0;
+int tkvalue = 0;
+
 static TKWord keywords[] = {
 	{ TK_PLUS, NULL, "+", NULL, NULL },	//+¼ÓºÅ
 	{ TK_MINUS, NULL, "-", NULL, NULL },	//-¼õºÅ
@@ -64,6 +68,7 @@ static TKWord keywords[] = {
 	{ KW_ELSE, NULL, "else", NULL, NULL },	// else
 	{ KW_FOR, NULL, "for", NULL, NULL },	// for
 	{ KW_CONTINUE, NULL, "continue", NULL, NULL },	// continue
+	{ KW_BREAK, NULL, "break", NULL, NULL}, // break
 	{ KW_RETURN, NULL, "return", NULL, NULL },	// return
 	{ KW_SIZEOF, NULL, "sizeof", NULL, NULL },	// sizeof
 
@@ -74,14 +79,36 @@ static TKWord keywords[] = {
 	{ 0, NULL, NULL, NULL, NULL },
 };
 
-void Lexer::init_lex()
+int Lexer::init_lex(const char* file_name)
 {
+	FILE* fp = fopen(file_name, "rb");
+	if (!fp)
+	{
+		return -1;
+	}
+
+	fseek(fp, 0, SEEK_END);
+	int len = static_cast<int>(ftell(fp));
+	fseek(fp, 0, SEEK_SET);
+
+	code_buf = reinterpret_cast<char*>(malloc((len + 1) * sizeof(char)));
+	int read_count = 0;
+	while (read_count < len)
+	{
+		read_count += fread(code_buf + read_count, sizeof(char), len - read_count, fp);
+	}
+
+	fclose(fp);
+
+	code_len = read_count;
+
 	TKWord* tp = NULL;
 
 	for (tp = &keywords[0]; tp->words; tp++)
 	{
 		word_table.direct_insert(tp);
 	}
+	return 1;
 }
 
 void Lexer::skip(int c)
@@ -100,6 +127,11 @@ const char* Lexer::get_tkstr(int word_idx)
 		return srcstr.c_str();
 	return
 		word_table.get_word_string(word_idx);
+}
+
+TKWord* Lexer::get_tkword(int word_idx)
+{
+	return word_table.tk_wordtable[word_idx];
 }
 
 void Lexer::get_char()
@@ -158,6 +190,7 @@ void Lexer::skip_white_space()
 {
 	while ( cur_ch == ' ' || cur_ch == '\t' || cur_ch == '\r')
 	{
+		bool is_line_feed = false;
 		if ( cur_ch == '\r' )
 		{
 			get_char();
@@ -165,9 +198,11 @@ void Lexer::skip_white_space()
 			{
 				return;
 			}
+			is_line_feed = true;
 			linenum++;
 		}
-		printf("%c", cur_ch);
+		if (!is_line_feed)
+			printf("%c", cur_ch);
 		get_char();
 	}
 }
@@ -371,6 +406,72 @@ void Lexer::get_token()
 		get_char();
 		break;
 	}
+
+	syntax_indent();
+}
+
+void print_tab(int n)
+{
+	for (int i = 0; i < n; i++)
+	{
+		printf("\t");
+	}
+}
+
+void Lexer::syntax_indent()
+{
+	switch (syntax_state)
+	{
+	case SNTX_NUL:
+		color_token(LEX_NORMAL);
+		break;
+	case SNTX_SP:
+		printf(" ");
+		color_token(LEX_NORMAL);
+		break;
+	case SNTX_LF_HT:
+		{
+			if (token == TK_END)
+				syntax_level--;
+			printf("\n");
+			print_tab(syntax_level);
+			color_token(LEX_NORMAL);
+		}
+		break;
+	case SNTX_DELAY:
+		break;
+	}
+	syntax_state = SNTX_NUL;
+}
+#include <windows.h>
+// lex colour
+void Lexer::color_token(int lex_state)
+{
+	HANDLE hHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+	char *p;
+	switch (lex_state)
+	{
+	case LEX_NORMAL:
+		{
+			// set the identifier foreground color is gray
+			if (token >= TK_IDENT)
+				SetConsoleTextAttribute(hHandle, FOREGROUND_INTENSITY);
+			else if (token >= KW_CHAR) // set the keyword foreground color is green
+				SetConsoleTextAttribute(hHandle, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+			else if (token > TK_CINT)
+				SetConsoleTextAttribute(hHandle, FOREGROUND_RED | FOREGROUND_GREEN);
+			else if (token >= TK_PLUS && token <= TK_COMMA)
+				SetConsoleTextAttribute(hHandle, FOREGROUND_RED | FOREGROUND_BLUE);
+			else
+				SetConsoleTextAttribute(hHandle, FOREGROUND_RED | FOREGROUND_INTENSITY);
+			p = const_cast<char*>(get_tkstr(token));
+			printf("%s", p);
+		}
+		break;
+	case LEX_SEP:
+		printf("%c", cur_ch);
+		break;
+	}
 }
 
 void Lexer::parse_identifier()
@@ -389,14 +490,30 @@ void Lexer::parse_identifier()
 void Lexer::parse_num()
 {
 	tkstr = "";
+	srcstr = "";
+
 	do 
 	{
 		tkstr += cur_ch;
+		srcstr += cur_ch;
 		get_char();
 	} while (is_digit(cur_ch));
 	
+	if ( cur_ch == '.')
+	{
+		do 
+		{
+			tkstr += cur_ch;
+			srcstr += cur_ch;
+		} while (is_digit(cur_ch));
+	}
+
+	tkstr += '\0';
+	srcstr += '\0';
+
 	long long value = atol(tkstr.c_str());
 
+	tkvalue = static_cast<int>(value);
 }
 
 void Lexer::parse_string(char sep)

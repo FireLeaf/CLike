@@ -79,10 +79,12 @@
     <ClInclude Include="CL_Hash.h" />
     <ClInclude Include="CL_CompDef.h" />
     <ClInclude Include="CL_Lex.h" />
+    <ClInclude Include="CL_Syntax.h" />
     <ClInclude Include="CL_Util.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CL_Lex.cpp" />
+    <ClCompile Include="CL_Syntax.cpp" />
     <ClCompile Include="CL_Util.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>

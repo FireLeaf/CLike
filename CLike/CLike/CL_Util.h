@@ -23,8 +23,6 @@ namespace Util{
 
 	void expect(const char* msg);
 
-	void skip(int c);
-
 	const char* get_tkstr(int v);
 
 	void link_error(const char* fmt, ...);
