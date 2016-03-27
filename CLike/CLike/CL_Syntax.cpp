@@ -81,7 +81,7 @@ int Syntax::type_size(Type *t, int *a)
 	Symbol *s;
 	int bt;
 	//pointer type length is 4
-	int PTR_SIZE = 4;
+	const int PTR_SIZE = 4;
 
 	bt = t->t & T_BTYPE;
 
@@ -139,7 +139,7 @@ Symbol* Syntax::sym_direct_push(SymbolStack& ss, int v, Type* type, int c)
 	Symbol *s = new Symbol;
 	s->v = v;
 	s->c = c;
-	s->type = type;
+	s->type = *type;
 	s->next = NULL;
 	s->prev_tok = NULL;
 	ss.push(s);
@@ -275,6 +275,7 @@ void Syntax::external_declatation(e_StorageClass space)
 	Type btype, type;
 	int v, has_init, r, addr;
 	Symbol* sym;
+	Section* sec = NULL;
 
 	if (!type_specifier(&btype))
 	{
@@ -335,9 +336,17 @@ void Syntax::external_declatation(e_StorageClass space)
 				if (has_init)//初值表达式
 				{
 					lex.get_token();
+				}
+
+				sec = allocate_storage(&type, r, has_init, v, &addr);
+				sym = var_sym_put(&type, r, v, addr);
+				if (space == SC_GLOBAL)
+					coff.coffsym_add_update(sym, addr, sec->index, 0, IMAGE_SYM_CLASS_EXTERNAL);
+				
+				if (has_init)
+				{
 					initializer(&type);
 				}
-				sym = var_sym_put(&type, r, v, addr);
 			}
 
 			if (token == TK_COMMA)
@@ -624,21 +633,195 @@ void Syntax::parameter_type_list(Type* type, int func_call)
 
 void Syntax::funcbody(Symbol* sym)
 {
+	codegen.ind = coff.sec_text->data_offset;
+	coff.coffsym_add_update(sym, ind, coff.sec_text->index, CST_FUNC, IMAGE_SYM_CLASS_EXTERNAL);
+
 	//放一匿名符号在局部符号表中
 	sym_direct_push(local_sym_stack, SC_ANOM, &int_type, 0);
+
+	gen_prolog(&sym->type);
+	codegen.rsym = 0;
 	compound_statement(NULL, NULL);//
+	backpatch(codegen.rsym, ind);
+	gen_epilog();
+	coff.sec_text->data_offset = codegen.ind;
 	//清空局部符号栈
 	sym_pop(local_sym_stack, NULL);
 }
 
-void Syntax::initializer(Type* type)
+void Syntax::gen_prolog(Type * func_type)
 {
-	if ( type->t & T_ARRAY)
+	int addr, align, size, func_call;
+	int param_addr;
+	Symbol *sym;
+	Type *type;
+
+	sym = func_type->ref;
+	func_call = sym->r;
+	addr = 8;
+	codegen.loc = 0;
+	codegen.func_begin_ind = codegen.ind;
+	codegen.ind += FUNC_PROLOG_SIZE;
+	// SUB ESP, ?? function parser end decided stack space and fill roll back
+	if (sym->type.t == T_STRUCT)
+		error("unsupported return struct");
+
+	// parameters definition
+	while ( (sym = sym->next) != NULL)
 	{
+		type = &sym->type;
+		size = type_size(type, &align);
+		size = calc_align(size, 4);	// push stack align to four byte
+
+		// struct pass pointer
+		if ( (type->t & T_BTYPE) == T_STRUCT )
+		{
+			size = 4;
+		}
+
+		param_addr = addr;
+		addr += size;
+
+		sym_push(sym->v & ~SC_PARAMS, type, SC_LOCAL | SC_LVAL, param_addr);
+
+		// __stdcall call convention, function clear stack by itself
+		if (func_call == KW_STDCALL)
+			codegen.func_ret_sub = addr - 8;
+	}
+}
+
+void Syntax::gen_epilog()
+{
+	int v = 0, saved_ind = 0, opc = 0;
+
+	// 8B /r mov r32, r/m32
+	codegen.gen_opcode1(0x8b);				// mov esp, ebp
+	codegen.gen_modrm(ADDR_REG, REG_ESP, REG_EBP, NULL, 0);
+
+	// 58+ rd pop r32
+	codegen.gen_opcode1(0x58 + REG_EBP);	// pop ebp
+
+	if (codegen.func_ret_sub == 0)
+	{
+		// C3 ret
+		codegen.gen_opcode1(0xc3);			// ret
+	}
+	else
+	{
+		// C2 iw	ret imm16
+		codegen.gen_opcode1(0xc2);			// ret n
+		codegen.gen_byte(static_cast<char>(codegen.func_ret_sub));
+		codegen.gen_byte(static_cast<char>(codegen.func_ret_sub >> 8));
+	}
+
+	v = calc_align(-codegen.loc, 4);
+	saved_ind = codegen.ind;
+	codegen.ind = codegen.func_begin_ind;
+
+	// PUSH
+	// 50 + rd	push r32
+	codegen.gen_opcode1(0x50 + REG_EBP);	// push ebp
+
+	// 89 /r mov r/m32, r32
+	codegen.gen_opcode1(0x89);
+	codegen.gen_modrm(ADDR_REG, REG_ESP, REG_EBP, NULL, 0); // mov ebp, esp
+
+	// SUB
+	// 81 /5 id sub r/m32, imm32
+	codegen.gen_opcode1(0x81);			// sub esp, stacksize
+	opc = 5;
+	codegen.gen_modrm(ADDR_REG, opc, REG_ESP, NULL, 0);
+	codegen.gen_dword(v);
+
+	codegen.ind = saved_ind;
+}
+
+void Syntax::initializer(Type* type, int c, Section* sec)
+{
+	if ( type->t & T_ARRAY && sec)
+	{
+		memcpy(sec->data + c, static_cast<const char*>(lex.tkstr), lex.tkstr.length());
 		lex.get_token();
 	}
 	else
+	{
 		assignment_expression();
+		init_variable(type, sec, c, 0);
+	}
+}
+
+void Syntax::init_variable(Type* type, Section* sec, int c, int v)
+{
+	int bt = 0;
+	void * ptr;
+
+	if (sec)
+	{
+		Operand* top = codegen.operand_stack.top();
+		if ((top->r & (SC_VALMASK | SC_LVAL)) != SC_GLOBAL)
+			error("global variable must initialize with constant");
+		
+		bt = type->t & T_BTYPE;
+		ptr = sec->data + c;
+		switch (bt)
+		{
+		case T_CHAR:
+			*reinterpret_cast<char*>(ptr) = top->value;				// apply to char g_c = 'a';
+			break;
+		case T_SHORT:
+			*reinterpret_cast<short*>(ptr) = top->value;			// apply to short g_s = 100;
+			break;
+		default:
+			if (top->r & SC_SYM)
+			{
+				// apply to char * g_pstr = "hello";
+				coff.coffreloc_add(sec, top->sym, c, IMAGE_REL_I386_DIR32);
+			}
+			*reinterpret_cast<int*>(ptr) = top->value;
+			break;
+		}
+		codegen.operand_pop();
+	}
+	else
+	{
+		// initialize array 
+		if (type->t & T_ARRAY)
+		{
+			codegen.operand_push(type, SC_LOCAL | SC_LVAL, c);
+			codegen.operand_swap();
+			codegen.spill_reg(REG_ECX);
+
+			Operand* top = codegen.operand_stack.top();
+			// B8 + rd mov r32, imm32
+			codegen.gen_opcode1(0xB8 + REG_ECX);		// mov ecx, n
+			codegen.gen_dword(top->type.ref->c);
+			codegen.gen_opcode1(0xB8 + REG_ESI);
+			codegen.gen_addr32(top->r, top->sym, top->value);	// mov esi, addr
+			codegen.operand_swap();
+
+			top = codegen.operand_stack.top();
+			// Lea
+			// 8D /r lea r32, m
+			// lea edi, [ebp - n]
+			codegen.gen_opcode1(0x8D);
+			codegen.gen_modrm(ADDR_OTHER, REG_EDI, SC_LOCAL, top->sym, top->value);
+			// Instruction prefix F3
+			codegen.gen_prefix(0xf3);		// rep movs byte
+			// MOVS/MOVSB/MOVSD
+			// A4 MOVSB
+			codegen.gen_opcode1(0xA4);
+
+			codegen.operand_pop();
+			codegen.operand_pop();
+		}
+		else
+		{
+			codegen.operand_push(type, SC_LOCAL | SC_LVAL, c);
+			codegen.operand_swap();
+			codegen.store0_1();
+			codegen.operand_pop();
+		}
+	}
 }
 
 void Syntax::statement(int* bsym, int* csym)
@@ -700,64 +883,101 @@ void Syntax::expression_statement()
 	if (token != TK_SEMICOLON)
 	{
 		expression();
+		codegen.operand_pop();
 	}
 
 	syntax_state = SNTX_LF_HT;
 	lex.skip(TK_SEMICOLON);
 }
 
-void Syntax::if_statement()
+void Syntax::if_statement(int* bsym, int *csym)
 {
+	int a = 0, b = 0;
+	
 	syntax_state = SNTX_SP;
 	lex.get_token();
 	lex.skip(TK_OPENPA);
 	expression();
 	syntax_state = SNTX_LF_HT;
 	lex.skip(TK_CLOSEPA);
-	statement(NULL, NULL);
+
+
+	a = codegen.gen_jcc(0);//reserve a jump, will fill back
+	statement(bsym, csym);
 	if (token == KW_ELSE)
 	{
 		syntax_state = SNTX_LF_HT;
 		lex.get_token();
-		statement(NULL, NULL);
+		b = codegen.gen_jmpforward(0);
+		backpatch(a, codegen.ind);
+		statement(bsym, csym);
+		backpatch(b, codegen.ind);
 	}
+	else
+		backpatch(a, codegen.ind);
 }
 
 void Syntax::for_statement()
 {
+	int a, b, c, d, e;
 	lex.get_token();
 	lex.skip(TK_OPENPA);
 	if (token != TK_SEMICOLON)
 	{
 		expression();
+		codegen.operand_pop();
 	}
 
 	lex.skip(TK_SEMICOLON);
+	
+	d = codegen.ind;
+	c = codegen.ind;
+	a = 0;
+	b = 0;
+
 	if (token != TK_SEMICOLON)
 	{
 		expression();
+		a = codegen.gen_jcc(0);
 	}
 
 	lex.skip(TK_SEMICOLON);
 	if (token != TK_CLOSEPA)
 	{
+		e = codegen.gen_jmpforward(0);
+		c = codegen.ind;
 		expression();
+		codegen.operand_pop();
+		codegen.gen_jmpbackward(c);
+		backpatch(e, codegen.ind);
 	}
 
 	syntax_state = SNTX_LF_HT;
 	lex.skip(TK_CLOSEPA);
-	statement(NULL, NULL);
+	statement(&a, &b);
+
+	codegen.gen_jmpbackward(c);
+	backpatch(a, codegen.ind);
+	backpatch(b, c);
 }
 
-void Syntax::continue_statement()
+void Syntax::continue_statement(int *csym)
 {
+	if (!csym)
+		error("cannot use continue in this");
+	
+	*csym = codegen.gen_jmpforward(*csym);
+
 	lex.get_token();
 	syntax_state = SNTX_LF_HT;
 	lex.skip(TK_SEMICOLON);
 }
 
-void Syntax::break_statement()
+void Syntax::break_statement(int *bsym)
 {
+	if (!bsym)
+		error("cannot use break in this");
+	*bsym = codegen.gen_jmpforward(*bsym);
 	lex.get_token();
 	syntax_state = SNTX_LF_HT;
 	lex.skip(TK_SEMICOLON);
@@ -781,10 +1001,14 @@ void Syntax::return_statement()
 	if (token != TK_SEMICOLON)
 	{
 		expression();
+		Operand* top = codegen.operand_stack.top();
+		codegen.load_1(REG_IRET, top);
+		codegen.operand_pop();
 	}
 
 	syntax_state = SNTX_LF_HT;
 	lex.skip(TK_SEMICOLON);
+	codegen.rsym = codegen.gen_jmpforward(codegen.rsym);
 }
 
 void Syntax::expression()
@@ -793,9 +1017,8 @@ void Syntax::expression()
 	{
 		assignment_expression();
 		if (token != TK_COMMA)
-		{
 			break;
-		}
+		codegen.operand_pop();
 		lex.get_token();
 	}
 }
@@ -805,6 +1028,7 @@ void Syntax::assignment_expression()
 	equality_expression();
 	if (token == TK_ASSIGN)
 	{
+		codegen.check_lvalue();
 		lex.get_token();
 		assignment_expression();
 	}
@@ -812,41 +1036,53 @@ void Syntax::assignment_expression()
 
 void Syntax::equality_expression()
 {
+	int t = 0;
 	relational_expression();
 	while (token == TK_EQ || token == TK_NEQ)
 	{
+		t = token;
 		lex.get_token();
 		relational_expression();
+		codegen.gen_op(t);
 	}
 }
 
 void Syntax::relational_expression()
 {
+	int t = 0;
 	additive_expression();
 	while (token == TK_LT || token == TK_LEQ || token == TK_GT || token == TK_GEQ)
 	{
+		t = token;
 		lex.get_token();
 		additive_expression();
+		codegen.gen_op(t);
 	}
 }
 
 void Syntax::additive_expression()
 {
+	int t = 0;
 	mutiplicative_expression();
 	while (token == TK_PLUS || token == TK_MINUS)
 	{
+		t = token;
 		lex.get_token();
 		mutiplicative_expression();
+		codegen.gen_op(t);
 	}
 }
 
 void Syntax::mutiplicative_expression()
 {
+	int t = 0;
 	unary_expression();
 	while ( token == TK_STAR || token == TK_DIVIDE || token == TK_MOD)
 	{
+		t = token;
 		lex.get_token();
 		unary_expression();
+		codegen.gen_op(t);
 	}
 }
 
@@ -855,11 +1091,34 @@ void Syntax::unary_expression()
 	switch (token)
 	{
 	case TK_AND:
+		{
+			lex.get_token();
+			unary_expression();
+			Operand* top = codegen.operand_stack.top();
+			if ( (top->type.t & T_BTYPE) != T_FUNC && 
+				 (top->type.t & T_ARRAY) != T_ARRAY
+				)
+			{
+				codegen.cancel_lvalue();
+			}
+
+			mk_pointer(&top->type);
+		}
+		break;
 	case TK_STAR:
-	case TK_PLUS:
-	case TK_MINUS:
 		lex.get_token();
 		unary_expression();
+		codegen.indirection();
+		break;
+	case TK_PLUS:
+		lex.get_token();
+		unary_expression();
+		break;
+	case TK_MINUS:
+		lex.get_token();
+		codegen.operand_push(&int_type, SC_GLOBAL, 0);
+		unary_expression();
+		codegen.gen_op(TK_MINUS);
 		break;
 	case KW_SIZEOF:
 		sizeof_expression();
@@ -883,22 +1142,58 @@ void Syntax::sizeof_expression()
 	size = type_size(&type, &align);
 	if (size < 0)
 		error("calculate type size failed!");
+
+	codegen.operand_push(&int_type, SC_GLOBAL, size);
 }
 
 void Syntax::postfix_expression()
 {
+	Symbol *s = NULL;
 	primary_expression();
 	while (true)
 	{
 		if (token == TK_DOT || token == TK_POINTSTO)
 		{
+			if (token == TK_POINTSTO)
+				codegen.indirection();
+			codegen.cancel_lvalue();
 			lex.get_token();
+			Operand *top = codegen.operand_stack.top();
+			if ((top->type.t & T_BTYPE) != T_STRUCT)
+				expect("struct variable");
+			s = top->type.ref;
 			token |= SC_MEMBER;
+
+			while ( ( s = s->next) != NULL)
+			{
+				if (s->v == token)
+					break;
+			}
+
+			if (!s)
+				error("no this member variable:%s", lex.get_tkstr(token & ~SC_MEMBER));
+			// member list address = struct variable pointer + member variable offset
+			top->type = char_pointer_type;
+			codegen.operand_push(&int_type, SC_GLOBAL, s->c);
+			codegen.gen_op(TK_PLUS);
+
+			// change type to member variable data type
+			top->type = s->type;
+
+			Operand *top = codegen.operand_stack.top();
+			// array variable cannot be lvalue
+			if ( !(top->type.t & T_ARRAY))
+			{
+				top->r |= SC_LVAL;
+			}
+
 			lex.get_token();
 		}
 		else if (token == TK_OPENBR)
 		{
 			lex.get_token();
+			codegen.gen_op(TK_PLUS);
+			codegen.indirection();
 			expression();
 			lex.skip(TK_CLOSEBR);
 		}
@@ -913,15 +1208,17 @@ void Syntax::postfix_expression()
 
 void Syntax::primary_expression()
 {
-	int t,addr;
+	int t, r, addr;
 	Type type;
 	Symbol *s;
+	Section *sec = NULL;
 
 	switch (token)
 	{
 	case TK_CINT:
 	case TK_CCHAR:
 		lex.get_token();
+		codegen.operand_push(&int_type, SC_GLOBAL, tkvalue);
 		break;
 	case TK_CSTR:
 		//lex.get_token();
@@ -929,8 +1226,9 @@ void Syntax::primary_expression()
 		type.t = t;
 		mk_pointer(&type);
 		type.t |= T_ARRAY;
+		sec = allocate_storage(&type, SC_GLOBAL, 2, 0, &addr);
 		var_sym_put(&type, SC_GLOBAL, 0, addr);
-		initializer(&type);
+		initializer(&type, addr, sec);
 		break;
 	case TK_OPENPA:
 		lex.get_token();
@@ -952,6 +1250,15 @@ void Syntax::primary_expression()
 			s = func_sym_push(t, &default_func_type);//允许函数不声明，直接引用
 			s->r = SC_GLOBAL | SC_SYM; 
 		}
+		r = s->r;
+		codegen.operand_push(&s->type, r, s->c);
+		Operand *top = codegen.operand_stack.top();
+		// symbol reference, operand must record symbol address
+		if (top->r & SC_SYM)
+		{
+			top->sym = s;
+			top->value = 0;
+		}
 
 		break;
 	}
@@ -959,19 +1266,107 @@ void Syntax::primary_expression()
 
 void Syntax::argument_expression_list()
 {
+	Operand ret;
+	Symbol *s, *sa;
+	int nb_args;
+	Operand* top = codegen.operand_stack.top();
+	s = top->type.ref;
 	lex.get_token();
+	sa = s->next;		// first parameter
+	nb_args = 0;
+	ret.type = s->type;
+	ret.r = REG_IRET;
+	ret.value = 0;
+
 	if (token != TK_CLOSEPA)
 	{
 		for (;;)
 		{
 			assignment_expression();
+			nb_args++;
+			if (sa)
+				sa = sa->next;
 			if (token == TK_CLOSEPA)
-			{
 				break;
-			}
 			lex.skip(TK_COMMA);
 		}
 	}
 
+	if (sa)
+		error("real argument less than function formal parameter");
+
 	lex.skip(TK_CLOSEPA);
+	codegen.gen_invoke(nb_args);
+	codegen.operand_push(&ret.type, ret.r, ret.value);
+}
+
+void Syntax::allocate_storage(Type* type, int r, int has_init, int v, int *addr)
+{
+	int size = 0, align = 0;
+	Section* sec = NULL;
+	size = type_size(type, &align);
+
+	if (size < 0)
+	{
+		if (type->t & T_ARRAY && type->ref->type.t == T_CHAR)
+		{
+			type->ref->c = strlen(static_cast<char*>(lex.tkstr)) + 1;
+			size = type_size(type, &align);
+		}
+		else
+			error("type size unknown");
+	}
+
+	// if the variable is local variable,allocate memory from stack
+	if ( (r & SC_VALMASK) == SC_LOCAL)
+	{
+		codegen.loc = calc_align(codegen.loc - size, align);
+		*addr = codegen.loc;
+	}
+	else
+	{
+		if (has_init == 1) // initialize global variable to .data section
+			sec = coff.sec_data;
+		else if (has_init == 2) // initialize read only variable to .rdata section
+			sec = coff.sec_rdata;
+		else
+			sec = coff.sec_bss; // the uninitialized variable
+
+		sec->data_offset = calc_align(sec->data_offset, align);
+		*addr = sec->data_offset;
+		sec->data_offset += size;
+
+		//add memory space to section
+		if (sec->sh.Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA
+			&& sec->data_offset > sec->data_allocated)
+			coff.section_realloc(sec, sec->data_offset);
+
+		if (v == 0) // constant string
+		{
+			codegen.operand_push(type, SC_GLOBAL | SC_SYM, *addr);
+			Operand* top = codegen.operand_stack.top();
+			top->sym = codegen.sym_sec_rdata;
+		}
+	}
+
+}
+
+void Syntax::backpatch(int t, int a)
+{
+	int n, *ptr;
+	while (t)
+	{
+		ptr = reinterpret_cast<int*>(coff.sec_text->data + t);
+		n = *ptr;
+		*ptr = a - t - 4;
+		t = n;
+	}
+}
+
+void Syntax::mk_pointer(Type* t)
+{
+	Symbol* s = NULL;
+	s = sym_push(SC_ANOM, t, 0, -1);
+	t->t = T_PTR;
+	t->ref = s;
 }

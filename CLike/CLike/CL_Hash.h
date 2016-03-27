@@ -15,6 +15,7 @@
 #include <string>
 
 #include "CL_CompDef.h"
+#include "CL_Util.h"
 
 #define MAXKEY 1024
 
@@ -29,21 +30,6 @@ struct TKWord
 
 struct TKHashtable
 {
-	static int elf_hash(const char* key)
-	{
-		unsigned int h = 0, g = 0;
-		while (*key)
-		{
-			h = (h << 4) + *key++;
-			g = h & 0xf00000000;
-			if (g)
-				h ^= g >> 24;
-			h &= ~g;
-		}
-		return h % MAXKEY;
-	}
-
-
 	TKHashtable()
 	{
 		for (int i = 0; i < MAXKEY; i++)
@@ -77,7 +63,7 @@ struct TKHashtable
 	{
 		int keyno = 0;
 		tk_wordtable.push_back(tp);
-		keyno = elf_hash(tp->words);
+		keyno = Util::elf_hash(tp->words);
 		tp->next = tk_hashtable[keyno];
 		tk_hashtable[keyno] = tp;
 	}
@@ -103,7 +89,7 @@ struct TKHashtable
 		char* end = NULL;
 		int length = 0;
 		
-		keyno = elf_hash(words);
+		keyno = Util::elf_hash(words);
 		tp = find(words, keyno);
 		if (tp)
 		{

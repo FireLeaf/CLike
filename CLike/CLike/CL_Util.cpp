@@ -12,6 +12,8 @@ Copyright (C) - All Rights Reserved with Coconat
 #include "CL_Lex.h"
 #include "CL_CompDef.h"
 
+#include <assert.h>
+
 namespace Util{
 	//output exception log
 	void handle_exception(int stage, int level, const char* fmt, va_list ap)
@@ -75,5 +77,37 @@ namespace Util{
 	{
 		return c >= '0' && c <= '9';
 	}
+	
+	void* mallocz(int size)
+	{
+		void* ptr = malloc(size);
+		if (!ptr)
+			error("malloc memory failed!");
 
+		memset(ptr, 0, size);
+		return ptr;
+	}
+
+	int elf_hash(const char* key)
+	{
+		unsigned int h = 0, g = 0;
+		while (*key)
+		{
+			h = (h << 4) + *key++;
+			g = h & 0xf00000000;
+			if (g)
+				h ^= g >> 24;
+			h &= ~g;
+		}
+		return h % MAXKEY;
+	}
+
+	void fpad(FILE* fp, int new_pos)
+	{
+		int curpos = ftell(fp);
+		while (++curpos < new_pos)
+		{
+			fputc(0, fp);
+		}
+	}
 }

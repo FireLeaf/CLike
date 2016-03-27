@@ -15,7 +15,7 @@ Copyright (C) - All Rights Reserved with Coconat
 
 #include <stack>
 
-// analyze source code syntax 
+// @Class analyze source code syntax 
 class Syntax
 {
 public:
@@ -128,9 +128,25 @@ protected:
 	// @Param sym symbol
 	void funcbody(Symbol* sym);
 
+	// @Function generate function begin code
+	// @Param func_type function type
+	void gen_prolog(Type * func_type);
+
+	// @Function generate function end code
+	void gen_epilog();
+
 	// @Function initializer
 	// @Param type
-	void initializer(Type* type);
+	// @Param c the variable related value
+	// @Param sec the section where the variable in
+	void initializer(Type* type, int c, Section* sec);
+
+	// @Function initialize variable
+	// @Param type variable type
+	// @Param sec section where the variable in
+	// @Param c the variable related value
+	// @Param v the word index
+	void init_variable(Type* type, Section* sec, int c, int v);
 
 	// @Function translation statement
 	// @Param bsym
@@ -146,19 +162,23 @@ protected:
 	void expression_statement();
 
 	// @Function if statement
-	void if_statement();
+	// @Param bsym break jump position
+	// @Param csym continue jump position
+	void if_statement(int* bsym, int *csym);
 
 	// @Function for statement
 	void for_statement();
 
 	// @Function continue statement
-	void continue_statement();
+	// @Param csym continue jump position
+	void continue_statement(int *csym);
 
 	// @Function break statement
-	void break_statement();
+	// @Param bsym break jump position
+	void break_statement(int * bsym);
 
 	// @Function return statement
-	void return_statement();
+	void return_statement(int * csym);
 
 	// @Function expression
 	void expression();
@@ -192,9 +212,27 @@ protected:
 
 	// @Function argument expression list
 	void argument_expression_list();
+protected:
+	// @Function allocate memory space
+	// @Return the section which store this variable
+	// @Param type variable type
+	// @Param r variable storage class
+	// @Param has_init is init?
+	// @Param v word index
+	// @Param addr variable store address
+	Section* allocate_storage(Type* type, int r, int has_init, int v, int *addr);
+
+	// @Function fill back, put in head of t every pending address fill determine address
+	// @Param t list head
+	// @Param a instruction jump position
+	void backpatch(int t, int a);
+
+	// @Function generate pointer type
+	// @Param t source data type
+	void mk_pointer(Type* t);
 public:
 	// @Function current token is specifier and get a token
-	// @Param type out: data type
+	// @Param type:out data type
 	bool type_specifier(Type* type);
 
 	// @Function sense is specifier
@@ -208,6 +246,12 @@ public:
 protected:
 	// @Property lex parser
 	Lexer lex;
+
+	// @Property Coff
+	Coff coff;
+
+	// @property codegen pointer
+	CodeGen codegen;
 
 	// @Property global symbol stack
 	SymbolStack global_sym_stack;

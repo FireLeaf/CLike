@@ -33,6 +33,17 @@ namespace Util{
 
 	// is a digit
 	bool is_digit(char c);
+
+	// @Function malloc memory and clear the memory region
+	// @Param size allocate count
+	void* mallocz(int size);
+
+	// @Function calculate string hash key
+	// @Param key the string
+	int elf_hash(const char* key);
+
+	// @Function fill 0
+	void fpad(FILE* fp, int new_pos);
 }
 
 #endif

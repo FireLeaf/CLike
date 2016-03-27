@@ -12,7 +12,11 @@
 #define __COCONAT_COMPDEF_H_
 
 // @MACRO
-#define ALIGN_SET 0x100
+#define ALIGN_SET	0x100	// force align mask
+
+// @Macro - use to CoffSym struct Type field
+#define CST_FUNC	0x20	// function
+#define CST_NOTFUNC	0x00	// no function
 
 enum e_ErrorLevel
 {
@@ -71,6 +75,27 @@ enum e_TypeCode
 
 	T_BTYPE		= 0x000f,	// basic type mask
 	T_ARRAY		= 0x0010,	// array
+};
+
+// @Enum register
+enum e_Register
+{
+	REG_EAX,
+	REG_ECX,
+	REG_EDX,
+	REG_EBX,
+	REG_ESP,
+	REG_EBP,
+	REG_ESI,
+	REG_EDI,
+	REG_ANY,
+};
+
+// @Enum addressing mode
+enum e_AddrForm
+{
+	ADDR_OTHER,			// register indirect addressing
+	ADDR_REG = 3,		// register direct addressing
 };
 
 enum e_TokenCode
