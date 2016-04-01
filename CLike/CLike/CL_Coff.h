@@ -49,11 +49,13 @@ struct CoffReloc
 };
 
 class CodeGen;
+class Linker;
 
 // @Class COFF file generate
 class Coff
 {
 	friend class CodeGen;
+	friend class Linker;
 public:
 	Coff() : ptr_lex(NULL), ptr_syntax(NULL), nsec_image(0), sec_text(NULL), sec_data(NULL),
 			 sec_bss(NULL), sec_idata(NULL), sec_rdata(NULL), sec_rel(NULL), sec_symtab(NULL),
