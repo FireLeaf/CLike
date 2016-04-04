@@ -10,19 +10,24 @@ Copyright (C) - All Rights Reserved with Coconat
 
 #include "CL_Coff.h"
 #include "CL_Util.h"
+#include "CL_Lex.h"
 
-using Util;
+using namespace Util;
 
 Coff::~Coff()
 {
-	for (int i = 0; i < sections.size(); i++)
+	for (int i = 0; i < static_cast<int>(sections.size()); i++)
 	{
-		Section* sec = reinterpret_cast<Section*>(sections[i].data[i]);
+		Section* sec = sections[i];
 		if (sec->hashtab)
 			free(sec->hashtab);
 		free(sec->data);
 	}
 	sections.clear();
+}
+
+void Coff::Init()
+{
 }
 
 void Coff::InitCoff(Lexer* lex, Syntax* syntax)
@@ -61,7 +66,7 @@ void Coff::write_obj(char* name)
 	file_offset = sizeof(IMAGE_FILE_HEADER) + nsec_obj * sh_size;
 	fpad(fout, file_offset);
 
-	fh = mallocz(sizeof(IMAGE_FILE_HEADER));
+	fh = reinterpret_cast<IMAGE_FILE_HEADER*>(mallocz(sizeof(IMAGE_FILE_HEADER)));
 	for (int i = 0; i < nsec_obj; i++)
 	{
 		Section* sec = reinterpret_cast<Section*>(sections[i]);
@@ -92,16 +97,16 @@ Section* Coff::section_new(char* name, int Characteristics)
 {
 	Section *sec = NULL;
 	int initsize = 8;
-	sec = mallocz(sizeof(Section));
+	sec = reinterpret_cast<Section*>(mallocz(sizeof(Section)));
 	if ( sec == NULL )
 	{
 		return NULL;
 	}
 
-	strcpy(sec->sh.Name, name);
+	strcpy(reinterpret_cast<char*>(sec->sh.Name), name);
 	sec->sh.Characteristics = Characteristics;
 	sec->index = sections.size() + 1;
-	sec->data = mallocz(sizeof(char) * initsize);
+	sec->data = reinterpret_cast<char*>(mallocz(sizeof(char) * initsize));
 	sec->data_allocated = initsize;
 
 	if (!(Characteristics & IMAGE_SCN_LNK_REMOVE))
@@ -135,7 +140,7 @@ void Coff::section_realloc(Section* sec, int new_size)
 	while (size < new_size)
 		size = size * 2;
 
-	data = realloc(sec->data, size);
+	data = reinterpret_cast<char*>(realloc(sec->data, size));
 	if (!data)
 		error("memory realloc failed!");
 
@@ -149,7 +154,7 @@ Section* Coff::new_coffsym_section(char* symtab_name, int Characteristics, char*
 	Section *sec = NULL;
 	sec = section_new(symtab_name, Characteristics);
 	sec->link = section_new(strtab_name, Characteristics);
-	sec->hashtab = mallocz(sizeof(int) * MAXKEY);
+	sec->hashtab = reinterpret_cast<int*>(mallocz(sizeof(int) * MAXKEY));
 	return sec;
 }
 
@@ -184,8 +189,8 @@ int Coff::coffsym_add(Section* symtab, char* name, int val, int sec_index, short
 	cs = coffsym_search(symtab, name);
 	if (cs == NULL)
 	{
-		cfsym = section_ptr_add(symtab, sizeof(CoffSym));
-		csname = coffstr_add(strtab, name);
+		cfsym = reinterpret_cast<CoffSym*>(section_ptr_add(symtab, sizeof(CoffSym)));
+		csname = reinterpret_cast<char*>(coffstr_add(strtab, name));
 		cfsym->Name = csname - strtab->data;
 		cfsym->Value = val;
 		cfsym->SectionNumber = sec_index;
@@ -200,13 +205,13 @@ int Coff::coffsym_add(Section* symtab, char* name, int val, int sec_index, short
 	return cs;
 }
 
-void Coff::coffstr_add(Section* strtab, char* name)
+char* Coff::coffstr_add(Section* strtab, char* name)
 {
 	int len = 0;
 	char *pstr = NULL;
 
 	len = strlen(name);
-	pstr = section_ptr_add(strtab, len + 1);
+	pstr = reinterpret_cast<char*>(section_ptr_add(strtab, len + 1));
 	memcpy(pstr, name, len);
 	return pstr;
 }
@@ -252,7 +257,7 @@ void Coff::coffreloc_add(Section* sec, Symbol* sym, int offset, char type)
 void Coff::coffreloc_direct_add(int offset, int cfsym, char section, char type)
 {
 	CoffReloc *rel = NULL;
-	rel = section_ptr_add(sec_rel, sizeof(CoffReloc));
+	rel = reinterpret_cast<CoffReloc*>(section_ptr_add(sec_rel, sizeof(CoffReloc)));
 	rel->offset = offset;
 	rel->cfsym = cfsym;
 	rel->section = section;

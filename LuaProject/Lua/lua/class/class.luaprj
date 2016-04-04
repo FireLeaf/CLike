@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+
+<Project Name="class.luaprj" >
+    <LuaFile RelativePath=".\..\class.lua" />
+    <LuaFile RelativePath=".\..\testclass.lua" />
+    <LuaFile RelativePath=".\..\testobject.lua" />
+    <LuaFile RelativePath=".\..\testclass1.lua" />
+    <LuaFile RelativePath=".\..\testclass2.lua" />
+</Project>

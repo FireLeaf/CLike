@@ -14,6 +14,8 @@ Copyright (C) - All Rights Reserved with Coconat
 #include "CL_Lex.h"
 
 #include <stack>
+#include "CL_Coff.h"
+#include "CL_CodeGen.h"
 
 // @Class analyze source code syntax 
 class Syntax
@@ -167,7 +169,7 @@ protected:
 	void if_statement(int* bsym, int *csym);
 
 	// @Function for statement
-	void for_statement();
+	void for_statement(int* bsym, int *csym);
 
 	// @Function continue statement
 	// @Param csym continue jump position
@@ -178,7 +180,7 @@ protected:
 	void break_statement(int * bsym);
 
 	// @Function return statement
-	void return_statement(int * csym);
+	void return_statement();
 
 	// @Function expression
 	void expression();
@@ -238,17 +240,12 @@ public:
 	// @Function sense is specifier
 	// @Param _token token
 	bool is_type_specifier(int _token);
-
-	// @Function get type size
-	// @Param t data type
-	// @Param a align pointer
-	int type_size(Type *t, int *a);
+public:
+	// @Property Coff
+	Coff coff;
 protected:
 	// @Property lex parser
 	Lexer lex;
-
-	// @Property Coff
-	Coff coff;
 
 	// @property codegen pointer
 	CodeGen codegen;
@@ -258,6 +255,9 @@ protected:
 
 	// @Property local symbol stack
 	SymbolStack local_sym_stack;
+
+	// @Property read only section symbol
+	Symbol * sym_sec_rdata;
 };
 
 #endif

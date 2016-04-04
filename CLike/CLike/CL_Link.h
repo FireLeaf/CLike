@@ -11,43 +11,18 @@ Copyright (C) - All Rights Reserved with Coconat
 #ifndef _CL_LINK_H_
 #define _CL_LINK_H_
 
+#include "CL_CompDef.h"
+
 class CodeGen;
-
-// @Structure import symbol 
-struct ImportSym
-{
-	int iat_index;
-	int thk_offset;
-	IMAGE_IMPORT_BY_NAME imp_sym;
-};
-
-// @Structure import module info
-struct ImportInfo
-{
-	int dll_index;
-	std::vector<ImportSym*> imp_syms;
-	IMAGE_IMPORT_DESCRIPTOR imphdr;
-};
-
-// @Structure PE information
-struct PEInfo 
-{
-	Section* thunk;				// section
-	const char* filename;		// PE file name
-	DWORD entry_addr;			// the entry point address
-	DWORD imp_offs;				//
-	DWORD imp_size;				//
-	DWORD iat_offs;				// Import address table data offset
-	DWORD iat_size;				// Import address table size
-	Section** secs;
-	int sec_size;
-	std::vector<ImportInfo*> imps;// import symbol 
-
-};
+class Coff;
 
 // @Class PE file linker
 class Linker
 {
+public:
+	Linker():ptr_coff(NULL){}
+
+	bool init();
 public:
 	// @Function load coff file
 	// @Return it will return whether load success
@@ -130,16 +105,16 @@ protected:
 	// @Param size table size(byte)
 	void pe_set_datadir(int dir, DWORD addr, DWORD size);
 
-	// @Function generate exe file
-	// @Param filename the exe name
-	int pe_output_file(char * filename);
-
 	// @Function calculate program entry point
 	// @Param pe the pe information pointer
 	void get_entry_addr(PEInfo* pe);
+public:
+	// @Function generate exe file
+	// @Param filename the exe name
+	int pe_output_file(char * filename);
 protected:
 	// @Property code gen pointer
-	CodeGen* ptr_codegen;
+	//CodeGen* ptr_codegen;
 
 	// @Property coff pointer
 	Coff* ptr_coff;

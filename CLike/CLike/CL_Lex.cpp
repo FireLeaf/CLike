@@ -420,6 +420,7 @@ void print_tab(int n)
 
 void Lexer::syntax_indent()
 {
+	//return;
 	switch (syntax_state)
 	{
 	case SNTX_NUL:

@@ -13,7 +13,9 @@ Copyright (C) - All Rights Reserved with Coconat
 
 #include <stack>
 
-#include "CL_Syntax.h"
+#include "CL_Util.h"
+
+using namespace Util;
 
 class Coff;
 
@@ -33,7 +35,7 @@ public:
 	// @Function operand in stack
 	OperandStack(){}
 	~OperandStack(){
-		for (int i = 0; i < stack_operand.size() i++)
+		for (int i = 0; i < static_cast<int>(stack_operand.size()); i++)
 		{
 
 		}
@@ -79,7 +81,7 @@ public:
 	Operand* get(int index)
 	{
 		int idx = stack_operand.size() - 1 + index;
-		if (idx >= 0 && idx < stack_operand.size())
+		if (idx >= 0 && idx < static_cast<int>(stack_operand.size()))
 			return stack_operand[idx];
 
 		return NULL;
@@ -100,8 +102,14 @@ public:
 // @Class code gen
 class CodeGen
 {
+	friend class Syntax;
 public:
 	CodeGen() : ptr_coff(NULL) {}
+
+	void Init(Coff* coff) 
+	{
+		ptr_coff = coff;
+	}
 protected:
 	// @Function push operand
 	// @Param type operand data type
@@ -194,7 +202,7 @@ public:
 
 	// @Function record pending jump address
 	// @Param s forward jump instruction address
-	void makelist(int s);
+	int makelist(int s);
 
 	// @Function indirect addressing
 	void indirection();
@@ -232,6 +240,12 @@ public:
 
 	// @Function generate call instruction
 	void gen_call();
+
+	/***********************************************************
+	* 功能:	调用完函数后恢复/释放栈,对于__cdecl
+	* val:		需要释放栈空间大小(以字节计)
+	**********************************************************/
+	void gen_addsp(int val);
 public:
 	// @Function allocate register
 	// @Param rc register type
@@ -261,9 +275,6 @@ protected:
 
 	// @Property function return need release space size
 	int func_ret_sub;
-
-	// @Property read only sction symbol
-	Symbol * sym_sec_rdata;
 
 	// @Property Coff class
 	Coff* ptr_coff;

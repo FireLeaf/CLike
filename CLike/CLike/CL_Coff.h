@@ -15,39 +15,8 @@ Copyright (C) - All Rights Reserved with Coconat
 
 #include "CL_CompDef.h"
 
-// @Struct section definition
-struct Section
-{
-	int data_offset;			// current data offset
-	char *data;					// section data
-	int data_allocated;			// need allocate data count
-	char index;					// section index
-	Section* link;				// related other section,like symbol section relation string section
-	int* hashtab;				// hash table, only use to store symbol table
-	IMAGE_SECTION_HEADER sh;	// section header
-};
-
-// @Struct coff symbol item
-struct CoffSym
-{
-	DWORD Name;					// Symbol name, offset in string table
-	DWORD Next;					// hash collision, string 
-	DWORD Value;				// 
-	short SectionNumber;		// 
-	WORD Type;					// 
-	BYTE StorageClass;			// 
-	BYTE NumberOfAuxSymbols;	// 
-};
-
-// @Struct coff relocation
-struct CoffReloc 
-{
-	DWORD offset;
-	DWORD cfsym;
-	BYTE section;
-	BYTE type;
-};
-
+class Lexer;
+class Syntax;
 class CodeGen;
 class Linker;
 
@@ -56,12 +25,15 @@ class Coff
 {
 	friend class CodeGen;
 	friend class Linker;
+	friend class Syntax;
 public:
 	Coff() : ptr_lex(NULL), ptr_syntax(NULL), nsec_image(0), sec_text(NULL), sec_data(NULL),
 			 sec_bss(NULL), sec_idata(NULL), sec_rdata(NULL), sec_rel(NULL), sec_symtab(NULL),
 			 sec_dynsymtab(NULL){}
 
 	~Coff();
+
+	void Init();
 
 	// @Function initialized coff
 	// @Param lex Lexer

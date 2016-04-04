@@ -11,12 +11,17 @@
 #ifndef __COCONAT_COMPDEF_H_
 #define __COCONAT_COMPDEF_H_
 
+#include <windows.h>
+#include <vector>
+
 // @MACRO
 #define ALIGN_SET	0x100	// force align mask
 
 // @Macro - use to CoffSym struct Type field
 #define CST_FUNC	0x20	// function
 #define CST_NOTFUNC	0x00	// no function
+
+#define FUNC_PROLOG_SIZE 9
 
 enum e_ErrorLevel
 {
@@ -91,11 +96,20 @@ enum e_Register
 	REG_ANY,
 };
 
+#define REG_IRET  REG_EAX	// 存放函数返回值的寄存器
+
 // @Enum addressing mode
 enum e_AddrForm
 {
 	ADDR_OTHER,			// register indirect addressing
 	ADDR_REG = 3,		// register direct addressing
+};
+
+// @Enum output type
+enum e_OutType
+{
+	OUTPUT_OBJ,			// obj file
+	OUPUT_EXE,			// execute file
 };
 
 enum e_TokenCode
@@ -158,8 +172,9 @@ struct Symbol;
 
 struct Type
 {
-	e_TypeCode t;	// data type
+	int t;	// data type
 	Symbol* ref;	// ref symbol
+	Type() : t(0), ref(NULL){}
 };
 
 // @Structure
@@ -171,6 +186,71 @@ struct Symbol
 	Type type;			// symbol data type
 	Symbol *next;		// other related symbol 
 	Symbol *prev_tok;	// pointer the previous same name symbol 
+};
+
+// @Struct section definition
+struct Section
+{
+	int data_offset;			// current data offset
+	char *data;					// section data
+	int data_allocated;			// need allocate data count
+	char index;					// section index
+	Section* link;				// related other section,like symbol section relation string section
+	int* hashtab;				// hash table, only use to store symbol table
+	IMAGE_SECTION_HEADER sh;	// section header
+};
+
+// @Struct coff symbol item
+struct CoffSym
+{
+	DWORD Name;					// Symbol name, offset in string table
+	DWORD Next;					// hash collision, string 
+	DWORD Value;				// 
+	short SectionNumber;		// 
+	WORD Type;					// 
+	BYTE StorageClass;			// 
+	BYTE NumberOfAuxSymbols;	// 
+};
+
+// @Struct coff relocation
+struct CoffReloc
+{
+	DWORD offset;
+	DWORD cfsym;
+	BYTE section;
+	BYTE type;
+};
+
+// @Structure import symbol 
+struct ImportSym
+{
+	int iat_index;
+	int thk_offset;
+	IMAGE_IMPORT_BY_NAME imp_sym;
+};
+
+// @Structure import module info
+struct ImportInfo
+{
+	int dll_index;
+	std::vector<ImportSym*> imp_syms;
+	IMAGE_IMPORT_DESCRIPTOR imphdr;
+};
+
+// @Structure PE information
+struct PEInfo
+{
+	Section* thunk;				// section
+	const char* filename;		// PE file name
+	DWORD entry_addr;			// the entry point address
+	DWORD imp_offs;				//
+	DWORD imp_size;				//
+	DWORD iat_offs;				// Import address table data offset
+	DWORD iat_size;				// Import address table size
+	Section** secs;
+	int sec_size;
+	std::vector<ImportInfo*> imps;// import symbol 
+
 };
 
 #endif

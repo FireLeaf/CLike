@@ -14,6 +14,10 @@ Copyright (C) - All Rights Reserved with Coconat
 #include <assert.h>
 using namespace Util;
 
+Type char_pointer_type,		// 字符串指针				
+	 int_type,				// int类型
+	 default_func_type;		// 缺省函数类型
+
 bool Syntax::type_specifier(Type* type)
 {
 	bool is_specifier = true;
@@ -53,7 +57,8 @@ bool Syntax::type_specifier(Type* type)
 		break;
 	}
 	
-	type->t = t;
+	if (is_specifier)
+		type->t = t;
 	return is_specifier;
 }
 
@@ -76,52 +81,27 @@ bool Syntax::is_type_specifier(int _token)
 	return is_specifier;
 }
 
-int Syntax::type_size(Type *t, int *a)
-{
-	Symbol *s;
-	int bt;
-	//pointer type length is 4
-	const int PTR_SIZE = 4;
-
-	bt = t->t & T_BTYPE;
-
-	switch (bt)
-	{
-	case T_STRUCT:
-		s = t->ref;
-		*a = s->r;
-		return s->c;
-	case T_PTR:
-		if ( t->t & T_ARRAY )
-		{
-			s = t->ref;
-			return type_size(&s->type, a) * s->c;
-		}
-		else
-		{
-			*a = PTR_SIZE;
-			return PTR_SIZE;
-		}
-	case T_INT:
-		*a = 4;
-		return 4;
-	case T_SHORT:
-		*a = 2;
-		return 2;
-	default://char,void, function
-		*a = 1;
-		return 1;
-	}
-}
-
 int Syntax::init_syntax(const char* src_path)
 {
 	if ( -1 == lex.init_lex(src_path))
 	{ 
 		return -1;
 	}
+
+	coff.InitCoff(&lex, this);
+	codegen.Init(&coff);
+
+	int_type.t = T_INT;
+	char_pointer_type.t = T_CHAR;
+	mk_pointer(&char_pointer_type);
+	default_func_type.t = T_FUNC;
+	default_func_type.ref = sym_push(SC_ANOM, &int_type, KW_CDECL, 0);
+
+	sym_sec_rdata = sec_sym_put(".rdata", 0);
+
 	lex.get_char();
 	lex.get_token();
+
 	return 1;
 }
 
@@ -168,6 +148,8 @@ Symbol* Syntax::sym_push(int v, Type* type, int r, int c)
 		ps->prev_tok = *pps;
 		*pps = ps;
 	}
+
+	return ps;
 }
 
 Symbol* Syntax::func_sym_push(int v, Type* type)
@@ -194,7 +176,7 @@ Symbol* Syntax::var_sym_put(Type* type, int r, int v, int addr)
 	{
 		sym = sym_push(v, type, r, addr);
 	}
-	else if ( (r & SC_VALMASK) == SC_GLOBAL )
+	else if ( v && (r & SC_VALMASK) == SC_GLOBAL )
 	{
 		sym = sym_search(v);
 		if (sym)
@@ -254,7 +236,7 @@ void Syntax::sym_pop(SymbolStack& ss, Symbol* b)
 
 Symbol* Syntax::struct_search(int v)
 {
-	if ( v >= lex.word_table.tk_wordtable.size())
+	if ( v >= static_cast<int>(lex.word_table.tk_wordtable.size()))
 	{
 		return NULL;
 	}
@@ -263,7 +245,7 @@ Symbol* Syntax::struct_search(int v)
 
 Symbol* Syntax::sym_search(int v)
 {
-	if (v >= lex.word_table.tk_wordtable.size())
+	if (v >= static_cast<int>(lex.word_table.tk_wordtable.size()))
 	{
 		return NULL;
 	}
@@ -306,7 +288,7 @@ void Syntax::external_declatation(e_StorageClass space)
 			if (sym)//函数前面声明过，现在是函数定义
 			{
 				if ((sym->type.t & T_BTYPE) != T_FUNC)
-					error("'%s' redefine", get_tkstr(v));
+					error("'%s' redefine", lex.get_tkstr(v));
 				sym->type = type;
 			}
 			else
@@ -330,7 +312,7 @@ void Syntax::external_declatation(e_StorageClass space)
 				if ( !(type.t & T_ARRAY) )
 					r |= SC_LVAL;
 				
-				r |= 1;
+				r |= space;
 				has_init = (token == TK_ASSIGN);
 
 				if (has_init)//初值表达式
@@ -345,7 +327,7 @@ void Syntax::external_declatation(e_StorageClass space)
 				
 				if (has_init)
 				{
-					initializer(&type);
+					initializer(&type, addr, sec);
 				}
 			}
 
@@ -399,14 +381,6 @@ void Syntax::struct_specifier(Type* type)
 
 	if (token == TK_BEGIN)
 		struct_declaration_list(type);
-}
-
-// @Function calculate struct align 
-// @Param n unalign value
-// @Param align
-int calc_align(int n, int align)
-{
-	return ( (n + align -1) & (align - 1) );
 }
 
 void Syntax::struct_declaration_list(Type *type)
@@ -470,9 +444,9 @@ void Syntax::struct_declaration(int *maxalign, int *offset, Symbol***ps)
 		ss = sym_push(v | SC_MEMBER, &type_sub, 0, *offset);
 		*offset += size;
 		**ps = ss;
-		*ps = &&ss->next;
+		*ps = &ss->next;
 
-		if (token == TK_SEMICOLON)
+		if (token == TK_SEMICOLON || token == TK_EOF)
 			break;
 		lex.skip(TK_COMMA);
 	}
@@ -591,7 +565,6 @@ void Syntax::parameter_type_list(Type* type, int func_call)
 	first = NULL;
 	plast = &first;
 
-	lex.get_token();
 	while (token != TK_CLOSEPA)
 	{
 		if (!type_specifier(&pt))
@@ -634,7 +607,7 @@ void Syntax::parameter_type_list(Type* type, int func_call)
 void Syntax::funcbody(Symbol* sym)
 {
 	codegen.ind = coff.sec_text->data_offset;
-	coff.coffsym_add_update(sym, ind, coff.sec_text->index, CST_FUNC, IMAGE_SYM_CLASS_EXTERNAL);
+	coff.coffsym_add_update(sym, codegen.ind, coff.sec_text->index, CST_FUNC, IMAGE_SYM_CLASS_EXTERNAL);
 
 	//放一匿名符号在局部符号表中
 	sym_direct_push(local_sym_stack, SC_ANOM, &int_type, 0);
@@ -642,7 +615,7 @@ void Syntax::funcbody(Symbol* sym)
 	gen_prolog(&sym->type);
 	codegen.rsym = 0;
 	compound_statement(NULL, NULL);//
-	backpatch(codegen.rsym, ind);
+	backpatch(codegen.rsym, codegen.ind);
 	gen_epilog();
 	coff.sec_text->data_offset = codegen.ind;
 	//清空局部符号栈
@@ -684,6 +657,7 @@ void Syntax::gen_prolog(Type * func_type)
 
 		sym_push(sym->v & ~SC_PARAMS, type, SC_LOCAL | SC_LVAL, param_addr);
 
+		codegen.func_ret_sub = 0;
 		// __stdcall call convention, function clear stack by itself
 		if (func_call == KW_STDCALL)
 			codegen.func_ret_sub = addr - 8;
@@ -740,7 +714,7 @@ void Syntax::initializer(Type* type, int c, Section* sec)
 {
 	if ( type->t & T_ARRAY && sec)
 	{
-		memcpy(sec->data + c, static_cast<const char*>(lex.tkstr), lex.tkstr.length());
+		memcpy(sec->data + c, lex.tkstr.c_str(), lex.tkstr.length());
 		lex.get_token();
 	}
 	else
@@ -829,22 +803,22 @@ void Syntax::statement(int* bsym, int* csym)
 	switch (token)
 	{
 	case TK_BEGIN:
-		compound_statement(/*bsym, csym*/);
+		compound_statement(bsym, csym);
 		break;
 	case KW_IF:
-		if_statement(/*bsym*/);
+		if_statement(bsym, csym);
 		break;
 	case KW_RETURN:
 		return_statement();
 		break;
 	case KW_BREAK:
-		break_statement(/*bsym*/);
+		break_statement(bsym);
 		break;
 	case KW_CONTINUE:
-		continue_statement(/*csym*/);
+		continue_statement(csym);
 		break;
 	case KW_FOR:
-		for_statement(/*bsym, csym*/);
+		for_statement(bsym, csym);
 		break;
 	default:
 		expression_statement();
@@ -868,7 +842,7 @@ void Syntax::compound_statement(int *bsym, int *csym)
 
 	while ( token != TK_END)
 	{
-		statement(NULL, NULL);
+		statement(bsym, csym);
 	}
 
 	syntax_state = SNTX_LF_HT;
@@ -917,7 +891,7 @@ void Syntax::if_statement(int* bsym, int *csym)
 		backpatch(a, codegen.ind);
 }
 
-void Syntax::for_statement()
+void Syntax::for_statement(int* bsym, int *csym)
 {
 	int a, b, c, d, e;
 	lex.get_token();
@@ -1031,6 +1005,7 @@ void Syntax::assignment_expression()
 		codegen.check_lvalue();
 		lex.get_token();
 		assignment_expression();
+		codegen.store0_1();
 	}
 }
 
@@ -1096,7 +1071,7 @@ void Syntax::unary_expression()
 			unary_expression();
 			Operand* top = codegen.operand_stack.top();
 			if ( (top->type.t & T_BTYPE) != T_FUNC && 
-				 (top->type.t & T_ARRAY) != T_ARRAY
+				 !(top->type.t & T_ARRAY)
 				)
 			{
 				codegen.cancel_lvalue();
@@ -1180,7 +1155,7 @@ void Syntax::postfix_expression()
 			// change type to member variable data type
 			top->type = s->type;
 
-			Operand *top = codegen.operand_stack.top();
+			top = codegen.operand_stack.top();
 			// array variable cannot be lvalue
 			if ( !(top->type.t & T_ARRAY))
 			{
@@ -1192,9 +1167,9 @@ void Syntax::postfix_expression()
 		else if (token == TK_OPENBR)
 		{
 			lex.get_token();
+			expression();
 			codegen.gen_op(TK_PLUS);
 			codegen.indirection();
-			expression();
 			lex.skip(TK_CLOSEBR);
 		}
 		else if (token == TK_OPENPA)
@@ -1245,7 +1220,7 @@ void Syntax::primary_expression()
 		if (!s)
 		{
 			if (token != TK_OPENPA)
-				error("'%s' undeclare", get_tkstr(t));
+				error("'%s' undeclare", lex.get_tkstr(t));
 
 			s = func_sym_push(t, &default_func_type);//允许函数不声明，直接引用
 			s->r = SC_GLOBAL | SC_SYM; 
@@ -1300,7 +1275,7 @@ void Syntax::argument_expression_list()
 	codegen.operand_push(&ret.type, ret.r, ret.value);
 }
 
-void Syntax::allocate_storage(Type* type, int r, int has_init, int v, int *addr)
+Section* Syntax::allocate_storage(Type* type, int r, int has_init, int v, int *addr)
 {
 	int size = 0, align = 0;
 	Section* sec = NULL;
@@ -1310,7 +1285,7 @@ void Syntax::allocate_storage(Type* type, int r, int has_init, int v, int *addr)
 	{
 		if (type->t & T_ARRAY && type->ref->type.t == T_CHAR)
 		{
-			type->ref->c = strlen(static_cast<char*>(lex.tkstr)) + 1;
+			type->ref->c = lex.tkstr.length() + 1;
 			size = type_size(type, &align);
 		}
 		else
@@ -1345,10 +1320,10 @@ void Syntax::allocate_storage(Type* type, int r, int has_init, int v, int *addr)
 		{
 			codegen.operand_push(type, SC_GLOBAL | SC_SYM, *addr);
 			Operand* top = codegen.operand_stack.top();
-			top->sym = codegen.sym_sec_rdata;
+			top->sym = sym_sec_rdata;
 		}
 	}
-
+	return sec;
 }
 
 void Syntax::backpatch(int t, int a)

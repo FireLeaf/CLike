@@ -70,7 +70,7 @@ namespace Util{
 
 	bool is_nodigit(char c)
 	{
-		return (c >= 'a' && c <= 'x') || (c >= 'A' && c <= 'Z') || (c == '_');
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c == '_');
 	}
 
 	bool is_digit(char c)
@@ -109,5 +109,78 @@ namespace Util{
 		{
 			fputc(0, fp);
 		}
+	}
+
+	int calc_align(int n, int align)
+	{
+		return ((n + align - 1) & (align - 1));
+	}
+
+	char* get_lib_path()
+	{
+		// Static library must location in at the same directory with compiler's 'lib' directory
+		char path[MAX_PATH];
+		char *p = nullptr;
+		GetModuleFileNameA(NULL, path, sizeof(path));
+		p = strrchr(path, '\\');
+		*p = '\0';
+		strcat(path, "\\lib\\");
+		return strdup(path);
+	}
+
+	char* get_file_ext(char * fname)
+	{
+		char* p = nullptr;
+		p = strrchr(fname, '.');
+		return p + 1;
+	}
+
+	int type_size(Type *t, int *a)
+	{
+		Symbol *s;
+		int bt;
+		//pointer type length is 4
+		const int PTR_SIZE = 4;
+
+		bt = t->t & T_BTYPE;
+
+		switch (bt)
+		{
+		case T_STRUCT:
+			s = t->ref;
+			*a = s->r;
+			return s->c;
+		case T_PTR:
+			if (t->t & T_ARRAY)
+			{
+				s = t->ref;
+				return type_size(&s->type, a) * s->c;
+			}
+			else
+			{
+				*a = PTR_SIZE;
+				return PTR_SIZE;
+			}
+		case T_INT:
+			*a = 4;
+			return 4;
+		case T_SHORT:
+			*a = 2;
+			return 2;
+		default://char,void, function
+			*a = 1;
+			return 1;
+		}
+	}
+
+	Type *pointed_type(Type *t)
+	{
+		return &t->ref->type;
+	}
+
+	int pointed_size(Type *t)
+	{
+		int align;
+		return type_size(pointed_type(t), &align);
 	}
 }

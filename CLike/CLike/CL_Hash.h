@@ -26,6 +26,7 @@ struct TKWord
 	char* words;
 	Symbol* sym_struct;
 	Symbol* sym_identifier;
+	//TKWord(){ memset(this, 0, sizeof(TKWord)); }
 };
 
 struct TKHashtable
@@ -96,7 +97,7 @@ struct TKHashtable
 			return tp;
 		}
 		length = strlen(words);
-		tp = reinterpret_cast<TKWord*>(malloc(sizeof(TKWord) + length + 1));
+		tp = reinterpret_cast<TKWord*>(Util::mallocz(sizeof(TKWord) + length + 1));
 		tp->next = tk_hashtable[keyno];
 		tk_hashtable[keyno] = tp;
 		tk_wordtable.push_back(tp);
@@ -113,7 +114,7 @@ struct TKHashtable
 	{
 		return tk_wordtable[idx] ? tk_wordtable[idx]->words : NULL;
 	}
-protected:
+public:
 	TKWord* tk_hashtable[MAXKEY];
 	std::vector<TKWord*> tk_wordtable;
 };

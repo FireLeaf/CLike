@@ -9,6 +9,14 @@ Copyright (C) - All Rights Reserved with Coconat
 *******************************************************************************/
 
 #include "CL_CodeGen.h"
+#include "CL_Util.h"
+#include "CL_Syntax.h"
+
+#include <assert.h>
+
+using namespace Util;
+
+extern Type char_pointer_type, int_type, default_func_type;
 
 void CodeGen::operand_push(Type *type, int r, int value)
 {
@@ -241,7 +249,7 @@ void CodeGen::store0_1()
 {
 	int r = 0, t = 0;
 
-	r = load_1(REG_ANY, &operand_stack.top());
+	r = load_1(REG_ANY, operand_stack.top());
 
 	// if lvalue overflow stack, need load to register
 	Operand* second_top = operand_stack.second_top();
@@ -253,12 +261,12 @@ void CodeGen::store0_1()
 		load(t, &opd);
 		second_top->r = t | SC_LVAL;
 	}
-	store(r, operand_stack.get(-2));
+	store(r, operand_stack.get(-1));
 	operand_swap();
 	operand_stack.pop();
 }
 
-void CodeGen::makelist(int s)
+int CodeGen::makelist(int s)
 {
 	int ind1 = 0;
 	ind1 = ind + 4;
@@ -520,7 +528,7 @@ void CodeGen::gen_jmpbackward(int a)
 	}
 }
 
-void CodeGen::gen_jcc(int t)
+int CodeGen::gen_jcc(int t)
 {
 	int v = 0;
 	int inv = 1;
@@ -579,15 +587,33 @@ void CodeGen::gen_invoke(int nb_args)
 		args_size += size;
 		operand_stack.pop();
 	}
-	
-	top = operand_stack.top();
 
 	spill_regs();
+	top = operand_stack.top();
 	func_call = top->type.ref->r; // get function call convention
 	gen_call();
 	if (args_size && func_call != KW_STDCALL)
 		gen_addsp(args_size);
 	operand_stack.pop();
+}
+
+void CodeGen::gen_addsp(int val)
+{
+	int opc = 0;
+	if (val == (char)val)
+	{
+		// ADD--Add	83 /0 ib	ADD r/m32,imm8	Add sign-extended imm8 from r/m32
+		gen_opcode1(0x83);	// ADD esp,val
+		gen_modrm(ADDR_REG, opc, REG_ESP, NULL, 0);
+		gen_byte(val);
+	}
+	else
+	{
+		// ADD--Add	81 /0 id	ADD r/m32,imm32	Add sign-extended imm32 to r/m32
+		gen_opcode1(81);	// add esp, val
+		gen_modrm(ADDR_REG, opc, REG_ESP, NULL, 0);
+		gen_dword(val);
+	}
 }
 
 void CodeGen::gen_call()
@@ -616,11 +642,12 @@ void CodeGen::gen_call()
 
 int CodeGen::allocate_reg(int rc)
 {
+	int r = 0;
 	Operand *p = NULL;
 	int used = 0;
 
 	// find free register
-	for (int r = 0; r <= REG_EBX; r++)
+	for ( r = 0; r <= REG_EBX; r++)
 	{
 		if (rc & REG_ANY || r == rc)
 		{

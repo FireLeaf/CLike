@@ -11,7 +11,11 @@
 #ifndef __COCONAT_CL_UTIL_H_
 #define __COCONAT_CL_UTIL_H_
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
+
+#include "CL_CompDef.h"
 
 namespace Util{
 
@@ -23,7 +27,7 @@ namespace Util{
 
 	void expect(const char* msg);
 
-	const char* get_tkstr(int v);
+	//const char* get_tkstr(int v);
 
 	void link_error(const char* fmt, ...);
 
@@ -44,6 +48,34 @@ namespace Util{
 
 	// @Function fill 0
 	void fpad(FILE* fp, int new_pos);
+
+	// @Function get type size
+	// @Param t data type
+	// @Param a align pointer
+	int type_size(Type *t, int *a);
+
+	// @Function calculate struct align 
+	// @Param n unalign value
+	// @Param align
+	int calc_align(int n, int align);
+
+	// @Function get file extension name
+	char* get_file_ext(char * fname);
+
+	// @Function get library path
+	char* get_lib_path();
+
+	/***********************************************************
+	* 功能:	返回t所指向的数据类型
+	* t:		指针类型
+	**********************************************************/
+	Type *pointed_type(Type *t);
+
+	/***********************************************************
+	* 功能:	返回t所指向的数据类型尺寸
+	* t:		指针类型
+	**********************************************************/
+	int pointed_size(Type *t);
 }
 
 #endif

@@ -15,6 +15,7 @@
 
 class Lexer
 {
+	friend class Syntax;
 public:
 
 	Lexer()

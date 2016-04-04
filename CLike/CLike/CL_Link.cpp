@@ -9,6 +9,17 @@ Copyright (C) - All Rights Reserved with Coconat
 *******************************************************************************/
 
 #include "CL_Link.h"
+#include "CL_Util.h"
+#include "CL_Coff.h"
+
+using namespace Util;
+
+extern std::vector< char* > array_dll;
+extern std::vector < char* > array_lib;
+extern char* entry_symbol;
+extern short subsystem;
+extern char* lib_path;
+
 
 // @Variable pe file dos header 
 IMAGE_DOS_HEADER dos_header = {
@@ -36,7 +47,7 @@ IMAGE_DOS_HEADER dos_header = {
 };
 
 // @Constant ms dos-stub 
-const unsigned byte dos_stub[0x40] = {
+const unsigned char dos_stub[0x40] = {
 	/* 14 code bytes + This program cannot be run inDOS mode.\n$' + 7 * 0x00*/
 	0x0e, 0x1f, 0xba, 0x0e, 0x00, 0xb4, 0x09, 0xcd, 0x21, 0xb8, 0x01, 0x4c, 0xcd, 0x21,
 	0x54, 0x68, 0x69, 0x73, 0x20, 0x70, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x20, 0x63,
@@ -97,15 +108,22 @@ IMAGE_NT_HEADERS32 nt_header = {
 
 		// IMAGE_DATA_DIRECTORY DataDirectory[16]; 
 		{
-			{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
-			{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+			{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
+			{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },
 		}
 	},
 };
 
+bool Linker::init()
+{
+	ptr_coff = new Coff;
+	return true;
+}
+
 int Linker::load_obj_file(char* fname)
 {
 	IMAGE_FILE_HEADER fh = { 0 };
+	ptr_coff->InitCoff(NULL, NULL);
 	std::vector< Section* >& secs = ptr_coff->sections;
 	int sh_size = 0, nsec_obj = 0, nsym = 0;
 	FILE *fobj = NULL;
@@ -137,23 +155,24 @@ int Linker::load_obj_file(char* fname)
 
 	for (int i = 0; i < nsec_obj; i++)
 	{
-		if (!strcmp(secs[i]->sh.Name, ".symtab"))
+		if (!strcmp(reinterpret_cast<const char*>(secs[i]->sh.Name), ".symtab"))
 		{
-			cfsyms = mallocz(secs[i]->sh.SizeOfRawData);
+			cfsyms = reinterpret_cast<CoffSym*>(mallocz(secs[i]->sh.SizeOfRawData));
 			fseek(fobj, SEEK_SET, secs[i]->sh.PointerToRawData);
 			fread(cfsyms, 1, secs[i]->sh.SizeOfRawData, fobj);
 			nsym = secs[i]->sh.SizeOfRawData / sizeof(CoffSym);
 			continue;
 		}
-		if (!strcmp(secs[i]->sh.Name, ".strtab"))
+		if (!strcmp(reinterpret_cast<const char*>(secs[i]->sh.Name), ".strtab"))
 		{
-			strs = mallocz(secs[i]->sh.SizeOfRawData);
+			strs = reinterpret_cast<char*>(mallocz(secs[i]->sh.SizeOfRawData));
 			fseek(fobj, SEEK_SET, secs[i]->sh.PointerToRawData);
 			fread(strs, 1, secs[i]->sh.SizeOfRawData, fobj);
 			continue;
 		}
 
-		if (!strcmp(secs[i]->sh.Name, ".dynsym") || !strcmp(secs[i]->sh.Name, ".dynstr"))
+		if (!strcmp(reinterpret_cast<const char*>(secs[i]->sh.Name), ".dynsym")
+			|| !strcmp(reinterpret_cast<const char*>(secs[i]->sh.Name), ".dynstr"))
 		{
 			continue;
 		}
@@ -163,7 +182,7 @@ int Linker::load_obj_file(char* fname)
 		fread(ptr, 1, secs[i]->sh.SizeOfRawData, fobj);
 	}
 
-	old_to_new_syms = mallocz(sizeof(int)* nsym);
+	old_to_new_syms = reinterpret_cast<int*>(mallocz(sizeof(int)* nsym));
 
 	for (int i = 0; i < nsym; i++)
 	{
@@ -197,12 +216,12 @@ int Linker::pe_load_lib_file(char* name)
 	int ret = -1;
 	char line[400], *dllname = NULL, *p = NULL;
 	FILE *fp = NULL;
-	sprintf(libfile, "%s%s.slib", lib_path, name);
-	fp = fopen(libfile, "rb")
+	sprintf_s(libfile, "%s%s.slib", lib_path, name);
+	fp = fopen(libfile, "rb");
 	if (fp)
 	{
 		dllname = get_dllname(libfile);
-		push_back(dllname);//...
+		array_dll.push_back(dllname);//...
 		while (true)
 		{
 			p = get_line(line, sizeof(line), fp);
@@ -210,7 +229,7 @@ int Linker::pe_load_lib_file(char* name)
 				break;
 			if (0 == *p || ';' == *p)
 				continue;
-			ptr_coff->coffsym_add(ptr_coff->sec_dynsymtab, p, count
+			ptr_coff->coffsym_add(ptr_coff->sec_dynsymtab, p, array_dll.size()
 								, ptr_coff->sec_text->index, CST_FUNC, IMAGE_SYM_CLASS_EXTERNAL);
 		}
 		ret = 0;
@@ -218,7 +237,7 @@ int Linker::pe_load_lib_file(char* name)
 	}
 	else
 	{
-		link_error("open file failed : \"\%s\"", libfile);
+		link_error("open file failed : \"%s\"", libfile);
 	}
 	return ret;
 }
@@ -239,7 +258,7 @@ char* Linker::get_dllname(char* libfile)
 	}
 
 	n2 = strlen(libname);
-	dllname = mallocz(sizeof(char)* n2);
+	dllname = reinterpret_cast<char*>(mallocz(sizeof(char)* n2));
 	memcpy(dllname, libname, n2 - 4);
 	memcpy(dllname + n2 - 4, "dll", 3);
 	return dllname;
@@ -269,13 +288,13 @@ void Linker::add_runtime_libs()
 {
 	int i = 0, pe_type = 0;
 
-	for (int i = 0; i < array_lib.size(); i++)
+	for (int i = 0; i < static_cast<int>(array_lib.size()); i++)
 	{
 		pe_load_lib_file(array_lib[i]);
 	}
 }
 
-void Linker::resolve_coffsyms(PEInfo* pe)
+int Linker::resolve_coffsyms(PEInfo* pe)
 {
 	CoffSym * sym = NULL;
 	int sym_index = 0, sym_end = 0;
@@ -283,7 +302,7 @@ void Linker::resolve_coffsyms(PEInfo* pe)
 	int found = 1;
 
 	sym_end = ptr_coff->sec_symtab->data_offset / sizeof(CoffSym);
-	if (sym_index = 1; sym_index < sym_end; sym_index++)
+	for (sym_index = 1; sym_index < sym_end; sym_index++)
 	{
 		sym = reinterpret_cast<CoffSym*>(ptr_coff->sec_symtab) + sym_index;
 		if (sym->SectionNumber  == IMAGE_SYM_UNDEFINED)
@@ -301,7 +320,7 @@ void Linker::resolve_coffsyms(PEInfo* pe)
 			if (!is)
 				found = 0;
 
-			if (found && Type == CST_FUNC)
+			if (found && type == CST_FUNC)
 			{
 				int offset = is->thk_offset;
 				char buffer[100];
@@ -309,7 +328,7 @@ void Linker::resolve_coffsyms(PEInfo* pe)
 				// FF /4 JMP r/m32 Jump near, absolute indirect, address given in r/m32
 				*reinterpret_cast<WORD*>(ptr_coff->section_ptr_add(ptr_coff->sec_text, 6)) = 0x25ff;
 
-				sprintf(buffer, "IAT.%s", name);
+				sprintf_s(buffer, "IAT.%s", name);
 				is->iat_index = ptr_coff->coffsym_add(ptr_coff->sec_symtab, buffer, 0, ptr_coff->sec_idata->index
 					, CST_FUNC, IMAGE_SYM_CLASS_EXTERNAL);
 				ptr_coff->coffreloc_direct_add(offset + 2, is->iat_index, ptr_coff->sec_text->index, IMAGE_REL_I386_DIR32);
@@ -348,35 +367,35 @@ ImportSym* Linker::pe_add_import(PEInfo* pe, int sym_index, char* name)
 	if (0 == dll_index)
 		return NULL;
 
-	auto iter = std::find(pe->imps.begin(), pe->imps.end(), [](const ImportInfo* info1, const ImportInfo* info2)->{
-		return info1->dll_index == info2->dll_index;
-	});
-	if (iter != pe->imps.end())
+	for (int info_idx = 0; info_idx < static_cast<int>(pe->imps.size()); info_idx++)
 	{
-		p = static_cast<ImportInfo*>(iter);
+		if (pe->imps[info_idx]->dll_index == dll_index)
+		{
+			p = pe->imps[info_idx];
+		}
 	}
-	else
+	if (!p)
 	{
 		p = new ImportInfo;
 		p->dll_index = dll_index;
 		pe->imps.push_back(p);
 	}
-	
-	auto iter = std::find(p->imp_syms.begin(), p->imp_syms.end(), [](const ImportSym* info1, const ImportSym* info2)->{
-		return info1->iat_index == info2->iat_index;
-	});
-	if (iter != p->imp_syms.end())
-	{
-		p = static_cast<ImportSym*>(iter);
-	}
-	else
-	{
-		s = mallocz(sizeof(ImportSym) + strlen(name));
-		strcpy(reinterpret_cast<char*>(&s->imp_sym.Name), name);
-		p->imp_syms.push_back(s);
 
-		return s;
+	
+	
+	for (int info_idx = 0; info_idx < static_cast<int>(p->imp_syms.size()); info_idx++)
+	{
+		if (p->imp_syms[info_idx]->iat_index == sym_index)
+		{
+			return p->imp_syms[info_idx];
+		}
 	}
+
+	s = reinterpret_cast<ImportSym*>(mallocz(sizeof(ImportSym) + strlen(name)));
+	strcpy(reinterpret_cast<char*>(&s->imp_sym.Name), name);
+	p->imp_syms.push_back(s);
+
+	return s;
 }
 
 int Linker::pe_assign_address(PEInfo* pe)
@@ -441,7 +460,7 @@ void Linker::pe_build_imports(PEInfo* pe)
 	thk_ptr = pe->iat_offs;
 	ent_ptr = pe->iat_offs + pe->iat_size;
 
-	for (i = 0; i < pe->imps.size(); i++)
+	for (i = 0; i < static_cast<int>(pe->imps.size()); i++)
 	{
 		int k, n, v;
 		ImportInfo * p = pe->imps[i];
@@ -465,9 +484,9 @@ void Linker::pe_build_imports(PEInfo* pe)
 
 				org_sym->Value = thk_ptr;
 				org_sym->SectionNumber = pe->thunk->index;
-				v = pe->thunk->data + rva_base;
+				v = reinterpret_cast<int>(pe->thunk->data + rva_base);
 
-				ptr_coff->section_ptr_add(pe->thunk, sizeof()is->imp_sym.Hint);
+				ptr_coff->section_ptr_add(pe->thunk, sizeof(is->imp_sym.Hint));
 				put_import_str(pe->thunk, is->imp_sym.Name);
 			}
 			else
@@ -476,19 +495,19 @@ void Linker::pe_build_imports(PEInfo* pe)
 			}
 
 			*reinterpret_cast<DWORD*>(pe->thunk->data + thk_ptr) =
-			reinterpret_cast<DWORD*>(pe->thunk->data + ent_ptr) = v;
+			*reinterpret_cast<DWORD*>(pe->thunk->data + ent_ptr) = static_cast<DWORD>(v);
 			thk_ptr += sizeof(DWORD);
 			ent_ptr += sizeof(DWORD);
 		}
 
 		dll_ptr += sizeof(IMAGE_IMPORT_DESCRIPTOR);
-		for (int sym_index = 0; sym_index < p->imp_syms.size(); sym_index++)
+		for (int sym_index = 0; sym_index < static_cast<int>(p->imp_syms.size()); sym_index++)
 		{
 			delete p->imp_syms[sym_index];
 		}
 		p->imp_syms.clear();
 	}
-	for (int imps_index = 0; imps_index < pe->imps.size(); imps_index++)
+	for (int imps_index = 0; imps_index < static_cast<int>(pe->imps.size()); imps_index++)
 	{
 		delete pe->imps[imps_index];
 	}
@@ -499,9 +518,9 @@ int Linker::put_import_str(Section * sec, char* sym)
 {
 	int offset = 0, len = 0;
 	char* ptr = nullptr;
-	len = strlen(sym) = 1;
+	len = strlen(sym) + 1;
 	offset = sec->data_offset;
-	ptr = ptr_coff->section_ptr_add(sec, len);
+	ptr = reinterpret_cast<char*>(ptr_coff->section_ptr_add(sec, len));
 	memcpy(ptr, sym, len);
 	return offset;
 }
@@ -556,4 +575,143 @@ void Linker::coffrelocs_fixup()
 		}
 	}
 
+}
+
+int Linker::pe_write(PEInfo* pe)
+{
+	FILE *op = nullptr;
+	DWORD file_offset = 0, r = 0;
+	int sizeofheaders;
+	op = fopen(pe->filename, "wb");
+	if (op == nullptr)
+	{
+		link_error("'%s' generate failed!", pe->filename);
+		return 1;
+	}
+
+	sizeofheaders = pe_file_align(sizeof(dos_header) + sizeof(dos_stub)
+								+ sizeof(nt_header) + pe->sec_size * sizeof(IMAGE_SECTION_HEADER));
+
+	file_offset = sizeofheaders;
+	fpad(op, file_offset);
+	for (int sec_idx = 0; sec_idx < pe->sec_size; sec_idx++)
+	{
+		Section* sec = pe->secs[sec_idx];
+		char * sh_name = reinterpret_cast<char*>(sec->sh.Name);
+		unsigned long addr = sec->sh.VirtualAddress - nt_header.OptionalHeader.ImageBase;
+		unsigned long size = sec->data_offset;
+		IMAGE_SECTION_HEADER* psh = &(sec->sh);
+
+		if (!strcmp(reinterpret_cast<const char*>(sec->sh.Name), ".text"))
+		{
+			nt_header.OptionalHeader.BaseOfCode = addr;
+			nt_header.OptionalHeader.AddressOfEntryPoint = addr + pe->entry_addr;
+		}
+		else if (!strcmp(reinterpret_cast<const char*>(sec->sh.Name), ".data"))
+		{
+			nt_header.OptionalHeader.BaseOfCode = addr;
+		}
+		else if (!strcmp(reinterpret_cast<const char*>(sec->sh.Name), ".idata"))
+		{
+			if (pe->imp_size)
+			{
+				pe_set_datadir(IMAGE_DIRECTORY_ENTRY_IMPORT, pe->imp_offs + addr, pe->imp_size);
+				pe_set_datadir(IMAGE_DIRECTORY_ENTRY_IAT, pe->iat_offs + addr, pe->iat_size);
+			}
+		}
+
+		strcpy(reinterpret_cast<char*>(psh->Name), sh_name);
+
+		psh->VirtualAddress = addr;
+		psh->Misc.VirtualSize = size;
+		nt_header.OptionalHeader.SizeOfImage = pe_virtual_align(size + addr);
+
+		if (sec->data_offset)
+		{
+			psh->PointerToRawData = r = file_offset;
+			if (!strcmp(reinterpret_cast<const char*>(sec->sh.Name), ".bss"))
+			{
+				sec->sh.SizeOfRawData = 0;
+				continue;
+			}
+
+			fwrite(sec->data, 1, sec->data_offset, op);
+			file_offset = pe_file_align(file_offset + sec->data_offset);
+			psh->SizeOfRawData = file_offset - r;
+			fpad(op, file_offset);
+		}
+	}
+
+	nt_header.FileHeader.NumberOfSections = pe->sec_size;
+	nt_header.OptionalHeader.SizeOfHeaders = sizeofheaders;
+
+	nt_header.OptionalHeader.Subsystem = subsystem;
+
+	fseek(op, SEEK_SET, 0);
+	fwrite(&dos_header, 1, sizeof(dos_header), op);
+	fwrite(&dos_stub, 1, sizeof(dos_stub), op);
+	fwrite(&nt_header, 1, sizeof(nt_header), op);
+
+	for (int sec_idx = 0; sec_idx < pe->sec_size; sec_idx++)
+	{
+		fwrite(&pe->secs[sec_idx]->sh, 1, sizeof(IMAGE_SECTION_HEADER), op);
+	}
+	fclose(op);
+	return 0;
+}
+
+DWORD Linker::pe_file_align(DWORD n)
+{
+	DWORD FileAlignment = nt_header.OptionalHeader.FileAlignment;
+	return calc_align(n, FileAlignment);
+}
+
+void Linker::pe_set_datadir(int dir, DWORD addr, DWORD size)
+{
+	nt_header.OptionalHeader.DataDirectory[dir].VirtualAddress = addr;
+	nt_header.OptionalHeader.DataDirectory[dir].Size = size;
+}
+
+int Linker::pe_output_file(char * filename)
+{
+	int ret = 0;
+	PEInfo pe = {0};
+	
+	pe.filename = filename;
+
+	// Load static library
+	add_runtime_libs();
+
+	// Get entry point
+	get_entry_addr(&pe);
+
+	// Resolve external symbol
+	ret = resolve_coffsyms(&pe);
+
+	if (0 == ret)
+	{
+		// 
+		pe_assign_address(&pe);
+		//
+		relocate_syms();
+
+		coffrelocs_fixup();
+
+		ret = pe_write(&pe);
+
+		free(pe.secs);
+	}
+	return ret;
+}
+
+void Linker::get_entry_addr(PEInfo* pe)
+{
+	unsigned long addr = 0;
+	int cs = 0;
+	CoffSym* cfsym_entry = NULL;
+
+	cs = ptr_coff->coffsym_search(ptr_coff->sec_symtab, entry_symbol);
+	cfsym_entry = reinterpret_cast<CoffSym*>(ptr_coff->sec_symtab->data) + cs;
+	addr = cfsym_entry->Value;
+	pe->entry_addr = addr;
 }
