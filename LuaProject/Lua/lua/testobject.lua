@@ -3,6 +3,12 @@ local TestClass1 = require("testclass1")
 local TestClass = require("testclass")
 
 local test2object= TestClass2.new()
+
+print(tostring(test2object))
+local pp = test2object.print
+test2object:print(13, "yangcao1")
+
+
 test2object:say_goodbye()
 print(test2object.c)
 

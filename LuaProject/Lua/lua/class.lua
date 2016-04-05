@@ -11,8 +11,17 @@
 -- @Param src the source lua table
 function shadow_copy(dest, src)
 	for k, v in pairs(src) do
-		dest[k] = src[v]
+		if dest[k] ~= v then
+			dest[k] = v
+		end
 	end
+end
+
+-- @Global shadow copy without metatable 
+function shadow_copy_withou_meta(dest, src)
+	local metatb = getmetatable(dest)
+	shadow_copy(dest, src)
+	setmetatable(dest, metatb)
 end
 
 -- @Global deep copy 'src' table to 'dest' table
@@ -81,6 +90,7 @@ setmetatable(_G, {__newindex = function(key, value) error(" Cannot indirect crea
 -- @Table store virtual function,
 local class_meta = {
 	class_name = "",
+	is_inherit_attr = false, -- when create first this class object, copy parent static field and all method to this
 	is_defined = false, -- indicate whether class has defined
 
 	virtual_method = {}, -- virtual function, implement dynamic binding, object space
@@ -106,7 +116,7 @@ class.declare = function (class_name)
 	if meta ~= nil then
 		return meta
 	end
-	
+
 	-- Create a new meta
 	meta = deep_copy({}, class_meta)
 	meta.class_name = class_name
@@ -115,17 +125,17 @@ class.declare = function (class_name)
 	-- Declare global class named
 	local class_static = declare_global("_"..class_name, "=", {})
 	setmetatable(class_static, {
-			__newindex = function(self, key, value) 
+			__newindex = function(self, key, value)
 				local updated = false
-				
+
 				-- @Local update static field
 				local function _update_static(meta_info)
 					local value_ref = meta_info.static_field[key]
 					if value_ref then
-						rawset(meta_info.static_field, key, value) 
-						return true	
+						rawset(meta_info.static_field, key, value)
+						return true
 					end
-					
+
 					for i = 1, #meta_info.inherit_classes do
 						local is_update = _update_static(meta_info.inherit_classes[i])
 						if is_update then
@@ -133,7 +143,7 @@ class.declare = function (class_name)
 						end
 					end
 				end
-				
+
 				updated = _update_static(meta)
 				if not updated then
 					error("Static class cannot add attrbute!")
@@ -185,49 +195,175 @@ class.define = function (class_name, ...)
 		--print(inherit_name)
 		meta.inherit_classes[#meta.inherit_classes + 1] = class.class_meta_list[inherit_name]
 	end
-	
+
 	--print(#meta.inherit_classes)
+	
+	-- @Local assemble argument descriptions
+	local function _assemble_arg_desces(arg_desces)
+		local parameter_list_type = "(self"
+		for i = 1, #arg_desces do
+			parameter_list_type = parameter_list_type .. "," .. arg_desces[i]
+		end
+		parameter_list_type = parameter_list_type .. ")"
+		return parameter_list_type
+	end
 
 	-- Generate object create factory
 	class.create_factory["create_" .. class_name] = function ( ... )
+		if not meta.is_defined then
+			error("Class :" .. class_name .. " not defined! Please end define it!")
+		end
+
+		if not meta.is_inherit_attr then
+			--print("dsfnansjn")
+			-- Copy parent
+			local __copied_class = {}
+			-- @Local copy all parent method or static field to this meta
+			local function _copy_attribute( attrs, attr_desc, meta_info)
+
+				-- If already build inherit donnot build again,
+				--	here should be optimized : if parent not build herit, help parent build it
+				if not meta_info.is_inherit_attr then
+					for i = 1, #meta_info.inherit_classes do
+						--print("ddd")
+						local parent_meta_info = meta_info.inherit_classes[i]
+						assert(parent_meta_info.is_defined)
+						if __copied_class[parent_meta_info] == nil then
+							_copy_attribute(attrs, attr_desc, parent_meta_info)
+						end
+					end
+				end
+
+				__copied_class[meta_info] = true
+
+				-- @Local find same argument function
+				local function _is_same_arg_func(func1, func2)
+					if #func1.arg_desces ~= #func2.arg_desces then
+						return false
+					else
+						for arg_idx = 1, #func1.arg_desces do
+							if func1.arg_desces[arg_idx] ~= func2.arg_desces[arg_idx] then
+								return false
+							end
+						end
+					end
+
+					return true
+				end
+
+				-- @Local copy and check method
+				local function _check_copy_attribute(method_name, methods)
+					local have_attribute = (nil ~= attrs[attr_desc])
+					attrs[attr_desc][method_name] = attrs[attr_desc][method_name] or {}
+					local attrs_methods = attrs[attr_desc][method_name]
+					--print(method_name .. " : " .. #methods)
+					local replaced_or_added = {} -- save method replaced or added idx
+					for method_idx = 1, #methods do
+						local _method = methods[method_idx]
+						if not have_attribute then -- Direct insert, because current not this name method
+							print("get a ".. attr_desc .. ":" .. method_name .." from class:" .. meta_info.class_name .. _assemble_arg_desces(_method.arg_desces))
+							attrs_methods[#attrs_methods] = _method
+						else
+							local inserted = false
+							for func_idx = 1, #attrs_methods do
+								if not replaced_or_added[func_idx] then
+									local _func = attrs_methods[func_idx]
+									if _is_same_arg_func(_func, _method) then
+										inserted = true
+										replaced_or_added[func_idx] = true
+									end
+								end
+							end
+
+							if not inserted then
+								print("get A ".. attr_desc .. ":" .. method_name .." from class:" .. meta_info.class_name .. _assemble_arg_desces(_method.arg_desces))
+								attrs_methods[#attrs_methods + 1] = _method
+								replaced_or_added[#attrs_methods] = true
+							end
+						end
+					end
+				end
+
+				print("ccc " .. attr_desc)
+				for k,v in pairs(meta_info[attr_desc]) do
+					
+					_check_copy_attribute(k, v)
+				end
+			end
+
+			local temp_simple_meta = {virtual_method={}, member_method={}, static_method={}}
+			_copy_attribute(temp_simple_meta, "virtual_method", meta)
+			_copy_attribute(temp_simple_meta, "member_method", meta)
+			_copy_attribute(temp_simple_meta, "static_method", meta)
+			--print("v:" .. #temp_simple_meta.virtual_method .. " m:" .. #temp_simple_meta.member_method .. " s:" .. #temp_simple_meta.static_method)
+			shadow_copy_withou_meta(meta.virtual_method , temp_simple_meta.virtual_method)
+			--print("v:" ..#meta.virtual_method)
+			shadow_copy_withou_meta(meta.member_method , temp_simple_meta.member_method)
+			shadow_copy_withou_meta(meta.static_method , temp_simple_meta.static_method)
+
+			--_copy_attribute(meta.static_field, "stat")
+			meta.is_inherit_attr = true
+		end
+
 		local object = {}
 		--object.meta.virtual_method = shadow_copy({}, meta.virtual_method)
 		--object.meta.member_method = shadow_copy({}, meta.member_method)
 		--object.meta.static_method = shadow_copy({}, meta.static_method)
 
 		-- Construct object member field
-		local object_member_field = {}
 
 		object.meta = {}
 
-		object.meta.member_field = object_member_field
-
-		-- @Local copy member_field
+		-- Copy member field
+		local __copied_field_calss = {}
+		-- @Local copy member_field from meta_info
 		local function _copy_member_filed(field, meta_info)
 			--print(#meta_info.inherit_classes)
 			-- First copy parent
 			for i = 1, #meta_info.inherit_classes do
-				_copy_member_filed(field, meta_info.inherit_classes[i])
+				local parent_meta_info = meta_info.inherit_classes[i]
+				if __copied_field_calss[parent_meta_info] == nil then
+					_copy_member_filed(field, parent_meta_info)
+				end
 			end
 
+			__copied_field_calss[meta_info] = true
+			-- If parent member field conflict
 			deep_copy(field, meta_info.member_field)
-
 			return field
 		end
-		_copy_member_filed(object_member_field, meta)
-		--deep_copy(object_member_field, meta.member_field)	
-		
+		local object_member_field = _copy_member_filed({}, meta)
+		object.meta.member_field = object_member_field
+
+		--deep_copy(object_member_field, meta.member_field)
+
 		local object_metatable = {
-			__newindex = function(self, key, value) 
+			__tostring = function()
+				-- @Local print function table
+				local function _print_function_table(pre, method_list)
+					for k, v in pairs(method_list) do
+						for method_idx = 1, #v do
+							local str_desc = _assemble_arg_desces(v[method_idx].arg_desces)
+							str_desc = pre .. k .. str_desc
+							print(str_desc)
+						end
+					end
+				end
+				_print_function_table("virutal ", meta.virtual_method)
+				_print_function_table("member ", meta.member_method)
+				_print_function_table("static ", meta.static_method)
+				return "end"
+			end,
+			__newindex = function(self, key, value)
 				local updated = false
-				
+
 				-- @Local find attribute
 				local function _update_attribute(key, value)
 					-- @Local find extra attribute
 					local function _update_extra_attribute(meta_info, key, value)
 						-- Find in static field
 						local value_ref = meta_info.static_field[key]
-						if value_ref then 
+						if value_ref then
 							rawset(meta_info.static_field, key, value)
 							return true
 						end
@@ -241,9 +377,9 @@ class.define = function (class_name, ...)
 
 					-- Find in member field
 					local value_ref = object.meta.member_field[key]
-					if value_ref then 
+					if value_ref then
 						rawset(object.meta.member_field, key, value)
-						return true 
+						return true
 					end
 
 					return _update_extra_attribute(meta, key, value)
@@ -251,7 +387,7 @@ class.define = function (class_name, ...)
 				updated = _update_attribute(key, value)
 				if not updated then
 					error("Object forbid create new attribute!")
-				end	
+				end
 			end,
 			__index = function(self, key)
 				-- @Local find attribute
@@ -291,7 +427,7 @@ class.define = function (class_name, ...)
 
 					return value_ref or _find_extra_attribute(meta)
 				end
-				
+
 				local ret_ref = _find_attribute(key)
 				if ret_ref then
 					return ret_ref
@@ -319,7 +455,7 @@ class.define = function (class_name, ...)
 		local method_wrap = {}
 		local arg_desces = {...}
 		local method_list
-		
+
 		--[[local parameter_list_type = "(self"
 		for i = 1, #arg_desces do
 			parameter_list_type = parameter_list_type .. "," .. arg_desces[i]
@@ -379,15 +515,15 @@ class.define = function (class_name, ...)
 										--print("hello")
 								 		return callable(...)
 								 	end
-								 end
-								
+								end
+
 								local parameter_list_type = "(self"
 								for i = 2, select('#', ...) do
 									local arg = select(i, ...)
 									parameter_list_type = parameter_list_type .. "," .. trait_type(arg)
 								end
 								parameter_list_type = parameter_list_type .. ")"
-								error("class :" .. class_name .. " no method :" .. key .. " parameter type :" .. parameter_list_type)
+								error("class [" .. class_name .. "] no method [" .. key .. "] parameter type :" .. parameter_list_type)
 							end
 						})
 				end
@@ -412,19 +548,15 @@ class.define = function (class_name, ...)
 								end
 							end
 						end
-						
-						if all_same then break end	
+
+						if all_same then break end
 					end
 					return all_same
 				end
 
 				if _check_redefine(methods, arg_desces) then
-					local parameter_list_type = "(self"
-					for i = 1, #arg_desces do
-						parameter_list_type = parameter_list_type .. "," .. arg_desces[i]
-					end
-					parameter_list_type = parameter_list_type .. ")"
-					error("Class[".. class_name .."] Function [" .. key .."] redefinitation" .. " parameter list :" .. parameter_list_type)
+
+					error("Class[".. class_name .."] Function [" .. key .."] redefinitation" .. " parameter list :" .. _assemble_arg_desces(arg_desces))
 				end
 
 				local callable = {}
