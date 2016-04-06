@@ -17,7 +17,7 @@ function shadow_copy(dest, src)
 	end
 end
 
--- @Global shadow copy without metatable 
+-- @Global shadow copy without metatable
 function shadow_copy_withou_meta(dest, src)
 	local metatb = getmetatable(dest)
 	shadow_copy(dest, src)
@@ -197,7 +197,7 @@ class.define = function (class_name, ...)
 	end
 
 	--print(#meta.inherit_classes)
-	
+
 	-- @Local assemble argument descriptions
 	local function _assemble_arg_desces(arg_desces)
 		local parameter_list_type = "(self"
@@ -221,6 +221,8 @@ class.define = function (class_name, ...)
 			-- @Local copy all parent method or static field to this meta
 			local function _copy_attribute( attrs, attr_desc, meta_info)
 
+				__copied_class[attr_desc] = __copied_class[attr_desc] or {}
+
 				-- If already build inherit donnot build again,
 				--	here should be optimized : if parent not build herit, help parent build it
 				if not meta_info.is_inherit_attr then
@@ -228,13 +230,13 @@ class.define = function (class_name, ...)
 						--print("ddd")
 						local parent_meta_info = meta_info.inherit_classes[i]
 						assert(parent_meta_info.is_defined)
-						if __copied_class[parent_meta_info] == nil then
+						if __copied_class[attr_desc][parent_meta_info] == nil then
 							_copy_attribute(attrs, attr_desc, parent_meta_info)
 						end
 					end
 				end
 
-				__copied_class[meta_info] = true
+				__copied_class[attr_desc][meta_info] = true
 
 				-- @Local find same argument function
 				local function _is_same_arg_func(func1, func2)
@@ -256,12 +258,72 @@ class.define = function (class_name, ...)
 					local have_attribute = (nil ~= attrs[attr_desc])
 					attrs[attr_desc][method_name] = attrs[attr_desc][method_name] or {}
 					local attrs_methods = attrs[attr_desc][method_name]
+
+					-- Create metatable to this method list
+					if getmetatable(attrs_methods) == nil then
+						setmetatable(attrs_methods, {
+							__tostring = function()
+								--return "Function meta(" .. method_name .. ":" .. tostring(value) .. ")"
+								--return "this is function [" .. method_name .. "] list"
+								-- @Local print function table
+								local str_methods = "Methods ["
+								local function _print_function_table(pre, methods)
+
+									for method_idx = 1, #methods do
+										local str_desc = _assemble_arg_desces(methods[method_idx].arg_desces)
+										str_methods = str_methods .. '\n' .. pre .. methods[method_idx].class_name .. "::" .. method_name .. str_desc --.. tostring(methods[method_idx])
+									end
+									str_methods = str_methods .. "]"
+									return str_methods
+								end
+								return _print_function_table(attr_desc, attrs_methods)
+
+							end,
+							__call = function(self, ...)
+								-- @Local check argument
+								local function _check_argument(ca, ...)
+									--print(#ca.arg_desces.. ":" .. select('#', ...))
+									if #ca.arg_desces ~= (select('#', ...) - 1) then
+										return
+									end
+
+									for i = 1, #ca.arg_desces do
+										local arg = select(i + 1, ...)
+										if ca.arg_desces[i] ~= trait_type(arg) then
+											--print()
+											return false
+										end
+									end
+									return true
+								end
+
+								-- Find a best function match parameter to call
+								for i = 1, #attrs_methods do
+									local have_call = false
+								 	local callable = attrs_methods[i]
+								 	if _check_argument(callable, ...) then
+										--print("hello")
+								 		return callable(...)
+								 	end
+								end
+
+								local parameter_list_type = "(self"
+								for i = 2, select('#', ...) do
+									local arg = select(i, ...)
+									parameter_list_type = parameter_list_type .. "," .. trait_type(arg)
+								end
+								parameter_list_type = parameter_list_type .. ")"
+								error("class [" .. class_name .. "] no method [" .. key .. "] parameter type :" .. parameter_list_type)
+							end
+						})
+					end
+
 					--print(method_name .. " : " .. #methods)
 					local replaced_or_added = {} -- save method replaced or added idx
 					for method_idx = 1, #methods do
 						local _method = methods[method_idx]
 						if not have_attribute then -- Direct insert, because current not this name method
-							print("get a ".. attr_desc .. ":" .. method_name .." from class:" .. meta_info.class_name .. _assemble_arg_desces(_method.arg_desces))
+							--print("get a ".. attr_desc .. ":" .. method_name .." from class:" .. meta_info.class_name .. _assemble_arg_desces(_method.arg_desces))
 							attrs_methods[#attrs_methods] = _method
 						else
 							local inserted = false
@@ -276,7 +338,7 @@ class.define = function (class_name, ...)
 							end
 
 							if not inserted then
-								print("get A ".. attr_desc .. ":" .. method_name .." from class:" .. meta_info.class_name .. _assemble_arg_desces(_method.arg_desces))
+								--print("get A ".. attr_desc .. ":" .. method_name .." from class:" .. meta_info.class_name .. _assemble_arg_desces(_method.arg_desces))
 								attrs_methods[#attrs_methods + 1] = _method
 								replaced_or_added[#attrs_methods] = true
 							end
@@ -284,9 +346,9 @@ class.define = function (class_name, ...)
 					end
 				end
 
-				print("ccc " .. attr_desc)
+				--print("ccc " .. attr_desc)
 				for k,v in pairs(meta_info[attr_desc]) do
-					
+
 					_check_copy_attribute(k, v)
 				end
 			end
@@ -344,7 +406,7 @@ class.define = function (class_name, ...)
 					for k, v in pairs(method_list) do
 						for method_idx = 1, #v do
 							local str_desc = _assemble_arg_desces(v[method_idx].arg_desces)
-							str_desc = pre .. k .. str_desc
+							str_desc = pre .. v[method_idx].class_name .. "::" ..k .. str_desc .. tostring(v[method_idx])
 							print(str_desc)
 						end
 					end
@@ -488,7 +550,11 @@ class.define = function (class_name, ...)
 				if not methods then
 					methods = {}
 					method_list[key] = methods
-					setmetatable(methods, {
+					-- It will create metatable when create a first this class object
+					--[[setmetatable(methods, {
+							__tostring = function()
+								return "Function meta(" .. key .. ":" .. tostring(value) .. ")"
+							end,
 							__call = function(self, ...)
 								-- @Local check argument
 								local function _check_argument(ca, ...)
@@ -525,7 +591,7 @@ class.define = function (class_name, ...)
 								parameter_list_type = parameter_list_type .. ")"
 								error("class [" .. class_name .. "] no method [" .. key .. "] parameter type :" .. parameter_list_type)
 							end
-						})
+						})]]
 				end
 
 
@@ -560,9 +626,14 @@ class.define = function (class_name, ...)
 				end
 
 				local callable = {}
+				callable.class_name = class_name
 				callable.arg_desces = arg_desces
 				callable.func = value
-				setmetatable(callable, {__call = function(self, ...)
+				setmetatable(callable, {
+				--[[__tostring = function()
+					return "to here"
+				end,]]
+				__call = function(self, ...)
 					-- @Local check argument
 					local function _check_argument(ca, ...)
 						assert(#ca.arg_desces == (select('#', ...) - 1))

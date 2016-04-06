@@ -6,6 +6,8 @@ local test2object= TestClass2.new()
 
 print(tostring(test2object))
 local pp = test2object.print
+
+print(tostring(test2object.print))
 test2object:print(13, "yangcao1")
 
 
@@ -13,14 +15,14 @@ test2object:say_goodbye()
 print(test2object.c)
 
 test2object:print(13, "yangcao1")
-test2object:piint("yangcao", "liweiyu")
+test2object:print("yangcao", "yc")
 
 local test1object = TestClass1.new()
 test1object:print(15, "yc")
 
 local testobject = TestClass.new()
 
-local testobject1 = TestClass.new()
+local testobject1 = TestClass1.new()
 testobject1.a = 102
 print(testobject.a)
 
@@ -45,4 +47,15 @@ print(test1object.c)
 
 test1object:say_hello()
 test1object:say_goodbye()
+
+test2object.a = 990
+
+print(testobject.a)
+print(testobject1.a)
+print(test2object.a)
+
+print(tostring(testobject))
+print("")
+print(tostring(testobject1))
+
 
